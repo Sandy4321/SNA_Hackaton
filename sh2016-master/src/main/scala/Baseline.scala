@@ -42,9 +42,19 @@ object Baseline {
     val numPartitions = 200
     val numPartitionsGraph = 107
 
-    // read graph, flat and reverse it
-    // step 1.a from description
 
+    //
+    // https://habrahabr.ru/company/odnoklassniki/blog/277527/
+    //
+
+    // step 1.0 read graph, flat and reverse it
+    //
+    // sc - spark context type
+    // textFile support ".gz" files
+    //
+    // input data type:
+    // 102416 {(5362439,0), (17772,0),(674295,0), ... }
+    // 2736 {(2542,0),(4570,0),(25832,0),(43782,0), ... }
     val graph = {
       sc.textFile(graphPath)
         .map(line => {
@@ -61,10 +71,12 @@ object Baseline {
         })
     }
 
+
+    // step 1.a from description
     graph
       .filter(userFriends => userFriends.friends.length >= 8 && userFriends.friends.length <= 1000)
-      .flatMap(userFriends => userFriends.friends.map(x => (x, userFriends.user)))
-      .groupByKey(numPartitions)
+      .flatMap(userFriends => userFriends.friends.map(x => (x, userFriends.user)))  // making new key
+      .groupByKey(numPartitions)          // number of groups that will be created after partitioning
       .map(t => UserFriends(t._1, t._2.toArray))
       .map(userFriends => userFriends.friends.sorted)
       .filter(friends => friends.length >= 2 && friends.length <= 2000)
@@ -72,7 +84,9 @@ object Baseline {
       .toDF
       .write.parquet(reversedGraphPath)
 
-    // for each pair of ppl count the amount of their common friends
+
+
+    // for each pair of plp count the amount of their common friends
     // amount of shared friends for pair (A, B) and for pair (B, A) is the same
     // so order pair: A < B and count common friends for pairs unique up to permutation
     // step 1.b
@@ -113,8 +127,17 @@ object Baseline {
 
 
     // step 3
+    //
+    // list of all users
     val usersBC = sc.broadcast(graph.map(userFriends => userFriends.user).collect().toSet)
 
+
+    //
+    // Create all pairs from usersBC like : (key = (user, friend), val = 1) 
+    // Here friend.id > user.id as it is in commonFriendCount data. 
+    // 
+    // positives - positive class
+    //
     val positives = {
       graph
         .flatMap(
@@ -155,6 +178,9 @@ object Baseline {
         .leftOuterJoin(positives)
     }
 
+    //
+    // if point class is not positive than we make it zero
+    //
     val data = {
       prepareData(commonFriendsCounts, positives, ageSexBC)
         .map(t => LabeledPoint(t._2._2.getOrElse(0.0), t._2._1))
