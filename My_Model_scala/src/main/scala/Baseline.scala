@@ -52,8 +52,8 @@ object Baseline {
     val predictionPath = dataDir + "prediction"
     val modelPath = dataDir + "LogisticRegressionModel"
     val numPartitions = 200
-    // val numPartitionsGraph = 107
-    val numPartitionsGraph = 10
+    val numPartitionsGraph = 107
+    // val numPartitionsGraph = 10
 
     //
     // https://habrahabr.ru/company/odnoklassniki/blog/277527/
@@ -133,8 +133,8 @@ object Baseline {
 
     val commonFriendsCounts = {
       sqlc
-        // .read.parquet(commonFriendsPath + "/part_33")
-        .read.parquet(commonFriendsPath + "/part_4")
+        .read.parquet(commonFriendsPath + "/part_33")
+        // .read.parquet(commonFriendsPath + "/part_4")
         .map(t => PairWithCommonFriends(t.getAs[Int](0), t.getAs[Int](1), t.getAs[Int](2)))
     }
 
@@ -212,8 +212,8 @@ object Baseline {
           ,if (cityRegBC.value.getOrElse(pair.person1, UserCity(-1, -1)).city == cityRegBC.value.getOrElse(pair.person2, UserCity(-1, -1)).city &&
                cityRegBC.value.getOrElse(pair.person1, UserCity(-1, -1)).city != -1) 1.0 else 0.0
           // city of active
-          // ,if (cityRegBC.value.getOrElse(pair.person1, UserCity(-1, -1)).city_active == cityRegBC.value.getOrElse(pair.person2, UserCity(-1, -1)).city_active &&
-          //      cityRegBC.value.getOrElse(pair.person1, UserCity(-1, -1)).city_active != -1) 1.0 else 0.0
+          ,if (cityRegBC.value.getOrElse(pair.person1, UserCity(-1, -1)).city_active == cityRegBC.value.getOrElse(pair.person2, UserCity(-1, -1)).city_active &&
+               cityRegBC.value.getOrElse(pair.person1, UserCity(-1, -1)).city_active != -1) 1.0 else 0.0
           ))
 
         )
