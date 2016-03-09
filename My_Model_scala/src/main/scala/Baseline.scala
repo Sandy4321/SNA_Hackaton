@@ -205,9 +205,16 @@ object Baseline {
         .map(pair => (pair.person1, pair.person2) -> (Vectors.dense(
           pair.commonFriendsCount.toDouble,
           abs(ageSexBC.value.getOrElse(pair.person1, AgeSex(0, 0)).age - ageSexBC.value.getOrElse(pair.person2, AgeSex(0, 0)).age).toDouble,
-          if (ageSexBC.value.getOrElse(pair.person1, AgeSex(0, 0)).sex == ageSexBC.value.getOrElse(pair.person2, AgeSex(0, 0)).sex) 1.0 else 0.0
-          ,if (cityRegBC.value.getOrElse(pair.person1, UserCity(0, 0)).city == cityRegBC.value.getOrElse(pair.person2, UserCity(0, 0)).city) 1.0 else 0.0
-          ,if (cityRegBC.value.getOrElse(pair.person1, UserCity(0, 0)).city_active == cityRegBC.value.getOrElse(pair.person2, UserCity(0, 0)).city_active) 1.0 else 0.0))
+          // sex
+          if (ageSexBC.value.getOrElse(pair.person1, AgeSex(0, 0)).sex == ageSexBC.value.getOrElse(pair.person2, AgeSex(0, 0)).sex && 
+              ageSexBC.value.getOrElse(pair.person1, AgeSex(0, 0)).sex != 0) 1.0 else 0.0
+          // city of residence
+          ,if (cityRegBC.value.getOrElse(pair.person1, UserCity(-1, -1)).city == cityRegBC.value.getOrElse(pair.person2, UserCity(-1, -1)).city &&
+               cityRegBC.value.getOrElse(pair.person1, UserCity(-1, -1)).city != -1) 1.0 else 0.0
+          // city of active
+          // ,if (cityRegBC.value.getOrElse(pair.person1, UserCity(-1, -1)).city_active == cityRegBC.value.getOrElse(pair.person2, UserCity(-1, -1)).city_active &&
+          //      cityRegBC.value.getOrElse(pair.person1, UserCity(-1, -1)).city_active != -1) 1.0 else 0.0
+          ))
 
         )
         
@@ -231,11 +238,12 @@ object Baseline {
     val validation = splits(1)
 
     // run training algorithm to build the model
-    val model = {
-      new LogisticRegressionWithLBFGS()
-        .setNumClasses(2)
-        .run(training)
-    }
+
+    // https://www.kaggle.com/rootua/avito-context-ad-clicks/apache-spark-scala-logistic-regression/run/27034
+    val model_not_trained =  new LogisticRegressionWithLBFGS().setNumClasses(2).setIntercept(true)
+    model_not_trained.optimizer.setNumIterations(1000)
+    val model = model_not_trained.run(training)
+
 
     model.clearThreshold()
     model.save(sc, modelPath)

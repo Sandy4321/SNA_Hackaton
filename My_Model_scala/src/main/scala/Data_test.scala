@@ -79,10 +79,24 @@ object Data_test {
 
      } 
 
+
+     val cityRegBC = sc.broadcast(CityReg.collectAsMap())
+
+
      CityReg.collect()
      CityReg.take(25).foreach(println)
 
      println ("\n \n Some important text \n \n")
+
+     //  53918274
+     //  38140533
+     //  38140322
+     //  51287302
+     //  46029233 - (338.., 0)
+     //
+
+     val kk = cityRegBC.value.getOrElse(46029233, UserCity(-1, -1)).city_active 
+     println (kk)
     }
 
 }
