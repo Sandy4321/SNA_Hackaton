@@ -13,6 +13,7 @@ $RECYCLE.BIN/
 *.msi
 *.msm
 *.msp
+*.tgz
 
 # Windows shortcuts
 *.lnk
@@ -53,4 +54,5 @@ input/*.csv
 
 #All data and spark
 Data
+Data_short
 spark-1.6.0
