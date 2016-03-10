@@ -19,7 +19,7 @@ import scala.collection.mutable.ArrayBuffer
 
 object Data_test {
 
-  def main(args: Array[String]) {
+  def main22(args: Array[String]) {
 
     val sparkConf = new SparkConf()
       .setAppName("Baseline")
@@ -41,15 +41,49 @@ object Data_test {
     val numPartitionsGraph = 20
 
 
-    val xx = "%021d".format(0).takeRight(21).map(_.toString().toInt)
-    val xx2 = Vectors.dense(1,2,3).toArray.deep
-    val xx33 = Vectors.dense(Array(100, 1, 2))
-    //val xx3 = Vectors.dense("%021d".format(0).takeRight(21).map(_.toInt))
+    def int_mask_to_binary(k: Int) = {
+            val t = k.toBinaryString
+            //String.format("%0"+(20-t.length())+"d%s",0,t)
+            val val22 = "%020d".format(0) + k.toBinaryString
+            val22.takeRight(21).map(_.toString().toInt)
+        
+        }
 
-    println (xx)
-    println (xx2)
-    println (xx2.union(xx))
-    println (xx3)
+
+
+    val graph = {
+      sc.textFile(graphPath)
+        .map(line => {
+          val lineSplit = line.split("\t")
+          val user = lineSplit(0).toInt
+          val friends = {
+            lineSplit(1)
+              .replace("{(", "")
+              .replace(")}", "")
+              .split("\\),\\(")
+              //.map(t => t.split(",")(0).toInt)
+              .map(t => Friend(t.split(",")(0).toInt,int_mask_to_binary(t.split(",")(1).toInt)))
+          }
+          UserFriends2(user, friends)
+        })
+    }
+
+
+    val friends_count = graph.map (t => t.user -> t.friends.length)
+
+    friends_count.take(20).map(t => println(t))
+
+    // val xx = "%021d".format(0).takeRight(21).map(_.toString().toInt)
+    // val xx2 = Vectors.dense(1,2,3).toArray.deep
+    // val tt = xx2.union(xx)
+
+    // //val xx33 = Vectors.dense(Array(100, 1, 2))
+    // //val xx3 = Vectors.dense("%021d".format(0).takeRight(21).map(_.toInt))
+
+    // println (xx  )
+    // println (xx2)
+    // println (Vectors.dense(tt.toArray.map({l => l.toString().toDouble})))
+
 
 
 

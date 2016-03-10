@@ -9,11 +9,16 @@ object TestBuild {
 
 	val xx = "%021d".format(0).takeRight(21).map(_.toString().toInt)
 	val xx2 = Vectors.dense(1,2,3)
+	val tt = xx +: xx2.toArray
 
 	println ("dsfsdfsf!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
 	println (xx)
 	println (xx2)
-	println (xx +: xx2.toArray)
+	println (tt)
+
+
+	val xx2 = Vectors.dense(tt)
+
 		 	//map(_.toString().toInt)).toInt
 	
 
