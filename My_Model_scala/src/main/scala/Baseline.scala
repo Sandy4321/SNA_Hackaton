@@ -31,10 +31,12 @@ case class UserFriends(user: Int, friends: Array[Int])
 case class AgeSex(age: Int, sex: Int)
 case class UserCity(city: Int, city_active: Int)
 
+case class Friend(user: Int, mask_bit: Seq[Int])
+case class UserFriends2(user: Int, friends: Array[Friend])
 
 object Baseline {
 
-  def main(args: Array[String]) {
+  def main22(args: Array[String]) {
 
     val sparkConf = new SparkConf()
       .setAppName("Baseline")
@@ -52,8 +54,8 @@ object Baseline {
     val predictionPath = dataDir + "prediction"
     val modelPath = dataDir + "LogisticRegressionModel"
     val numPartitions = 200
-    val numPartitionsGraph = 107
-    // val numPartitionsGraph = 10
+    // val numPartitionsGraph = 107
+    val numPartitionsGraph = 10
 
     //
     // https://habrahabr.ru/company/odnoklassniki/blog/277527/
@@ -67,6 +69,18 @@ object Baseline {
     // input data type:
     // 102416 {(5362439,0), (17772,0),(674295,0), ... }
     // 2736 {(2542,0),(4570,0),(25832,0),(43782,0), ... }
+
+
+    def int_mask_to_binary(k: Int) = {
+            val t = k.toBinaryString
+            //String.format("%0"+(20-t.length())+"d%s",0,t)
+            val val22 = "%020d".format(0) + k.toBinaryString
+            val22.takeRight(21).map(_.toString().toInt)
+        
+        }
+
+
+
     val graph = {
       sc.textFile(graphPath)
         .map(line => {
@@ -77,17 +91,20 @@ object Baseline {
               .replace("{(", "")
               .replace(")}", "")
               .split("\\),\\(")
-              .map(t => t.split(",")(0).toInt)
+              //.map(t => t.split(",")(0).toInt)
+              .map(t => Friend(t.split(",")(0).toInt,int_mask_to_binary(t.split(",")(1).toInt)))
           }
-          UserFriends(user, friends)
+          UserFriends2(user, friends)
         })
     }
+
+
 
 
     // step 1.a from description
     graph
       .filter(userFriends => userFriends.friends.length >= 8 && userFriends.friends.length <= 1000)
-      .flatMap(userFriends => userFriends.friends.map(x => (x, userFriends.user)))  // making new key
+      .flatMap(userFriends => userFriends.friends.map(x => (x.user, userFriends.user)))  // making new key
       .groupByKey(numPartitions)          // number of groups that will be created after partitioning
       .map(t => UserFriends(t._1, t._2.toArray))
       .map(userFriends => userFriends.friends.sorted)
@@ -133,8 +150,8 @@ object Baseline {
 
     val commonFriendsCounts = {
       sqlc
-        .read.parquet(commonFriendsPath + "/part_33")
-        // .read.parquet(commonFriendsPath + "/part_4")
+        //.read.parquet(commonFriendsPath + "/part_33")
+        .read.parquet(commonFriendsPath + "/part_4")
         .map(t => PairWithCommonFriends(t.getAs[Int](0), t.getAs[Int](1), t.getAs[Int](2)))
     }
 
@@ -155,8 +172,8 @@ object Baseline {
       graph
         .flatMap(
           userFriends => userFriends.friends
-            .filter(x => (usersBC.value.contains(x) && x > userFriends.user))
-            .map(x => (userFriends.user, x) -> 1.0)
+            .filter(x => (usersBC.value.contains(x.user) && x.user > userFriends.user))
+            .map(x => (userFriends.user, x.user) -> 1.0)
         )
     }
 
@@ -194,12 +211,28 @@ object Baseline {
     val cityRegBC = sc.broadcast(CityReg.collectAsMap())
 
 
+
+    val friend_masks = {
+          graph
+            .flatMap(
+              userFriends => userFriends.friends
+                .filter(x => (usersBC.value.contains(x.user) && x.user > userFriends.user))
+                .map(x => (userFriends.user, x.user) -> x.mask_bit)
+            )
+        }
+
+
+
+
     // step 5
     def prepareData(
                      commonFriendsCounts: RDD[PairWithCommonFriends],
                      positives: RDD[((Int, Int), Double)],
+                     friend_masks: RDD[((Int, Int), Seq[Int])],
                      ageSexBC:  Broadcast[scala.collection.Map[Int, AgeSex ]],
                      cityRegBC: Broadcast[scala.collection.Map[Int, UserCity]]) = {
+
+      val zero_fr_masks_lst = "%021d".format(0).takeRight(21).map(_.toString().toInt)
 
       commonFriendsCounts
         .map(pair => (pair.person1, pair.person2) -> (Vectors.dense(
@@ -217,8 +250,10 @@ object Baseline {
           ))
 
         )
-        
+        .leftOuterJoin(friend_masks)
+        //.map(x => x._1 -> Vectors.dense(x._2._1.toArray.union(x._2._2)))
         .leftOuterJoin(positives)
+        
     }
 
 
@@ -226,77 +261,90 @@ object Baseline {
     // if point class is not positive than we make it zero
     //
     val data = {
-      prepareData(commonFriendsCounts, positives, ageSexBC, cityRegBC)
-        .map(t => LabeledPoint(t._2._2.getOrElse(0.0), t._2._1))
+      prepareData(commonFriendsCounts, positives, friend_masks, ageSexBC, cityRegBC)
+        //.map(t => LabeledPoint(t._2._2.getOrElse(0.0), t._2._1))
     }
 
 
-    // split data into training (10%) and validation (90%)
-    // step 6
-    val splits = data.randomSplit(Array(0.1, 0.9), seed = 11L)
-    val training = splits(0).cache()
-    val validation = splits(1)
 
-    // run training algorithm to build the model
-
-    // https://www.kaggle.com/rootua/avito-context-ad-clicks/apache-spark-scala-logistic-regression/run/27034
-    val model_not_trained =  new LogisticRegressionWithLBFGS().setNumClasses(2).setIntercept(true)
-    model_not_trained.optimizer.setNumIterations(1000)
-    val model = model_not_trained.run(training)
+    println ("\n\n\n\n\n")
+    println ("\n\n\n\n\n")
+    println ("\n\n\n\n\n")
+    println ("------------TESTS -------------------------!!")
+    data.take(20).map(t => println(t))
+    println ("\n\n\n\n\n")
+    println ("\n\n\n\n\n")
+    println ("\n\n\n\n\n")
 
 
-    model.clearThreshold()
-    model.save(sc, modelPath)
 
-    val predictionAndLabels = {
-      validation.map { case LabeledPoint(label, features) =>
-        val prediction = model.predict(features)
-        (prediction, label)
-      }
-    }
+    // // split data into training (10%) and validation (90%)
+    // // step 6
+    // val splits = data.randomSplit(Array(0.1, 0.9), seed = 11L)
+    // val training = splits(0).cache()
+    // val validation = splits(1)
 
-    // estimate model quality
-    @transient val metricsLogReg = new BinaryClassificationMetrics(predictionAndLabels, 100)
-    val threshold = metricsLogReg.fMeasureByThreshold(2.0).sortBy(-_._2).take(1)(0)._1
+    // // run training algorithm to build the model
 
-    val rocLogReg = metricsLogReg.areaUnderROC()
-    println("model ROC = " + rocLogReg.toString)
+    // // https://www.kaggle.com/rootua/avito-context-ad-clicks/apache-spark-scala-logistic-regression/run/27034
+    // val model_not_trained =  new LogisticRegressionWithLBFGS().setNumClasses(2).setIntercept(true)
+    // model_not_trained.optimizer.setNumIterations(1000)
+    // val model = model_not_trained.run(training)
 
-    // compute scores on the test set
-    // step 7
-    val testCommonFriendsCounts = {
-      sqlc
-        .read.parquet(commonFriendsPath + "/part_*/")
-        .map(t => PairWithCommonFriends(t.getAs[Int](0), t.getAs[Int](1), t.getAs[Int](2)))
-        .filter(pair => pair.person1 % 11 == 7 || pair.person2 % 11 == 7)
-    }
 
-    val testData = {
-      prepareData(testCommonFriendsCounts, positives, ageSexBC,cityRegBC)
-        .map(t => t._1 -> LabeledPoint(t._2._2.getOrElse(0.0), t._2._1))
-        .filter(t => t._2.label == 0.0)
-    }
+    // model.clearThreshold()
+    // model.save(sc, modelPath)
 
-    // step 8
-    val testPrediction = {
-      testData
-        .flatMap { case (id, LabeledPoint(label, features)) =>
-          val prediction = model.predict(features)
-          Seq(id._1 -> (id._2, prediction), id._2 -> (id._1, prediction))
-        }
-        .filter(t => t._1 % 11 == 7 && t._2._2 >= threshold)
-        .groupByKey(numPartitions)
-        .map(t => {
-          val user = t._1
-          val firendsWithRatings = t._2
-          val topBestFriends = firendsWithRatings.toList.sortBy(-_._2).take(100).map(x => x._1)
-          (user, topBestFriends)
-        })
-        .sortByKey(true, 1)
-        .map(t => t._1 + "\t" + t._2.mkString("\t"))
-    }
+    // val predictionAndLabels = {
+    //   validation.map { case LabeledPoint(label, features) =>
+    //     val prediction = model.predict(features)
+    //     (prediction, label)
+    //   }
+    // }
 
-    testPrediction.saveAsTextFile(predictionPath,  classOf[GzipCodec])
-    println("model ROC = " + rocLogReg.toString)
+    // // estimate model quality
+    // @transient val metricsLogReg = new BinaryClassificationMetrics(predictionAndLabels, 100)
+    // val threshold = metricsLogReg.fMeasureByThreshold(2.0).sortBy(-_._2).take(1)(0)._1
+
+    // val rocLogReg = metricsLogReg.areaUnderROC()
+    // println("model ROC = " + rocLogReg.toString)
+
+    // // compute scores on the test set
+    // // step 7
+    // val testCommonFriendsCounts = {
+    //   sqlc
+    //     .read.parquet(commonFriendsPath + "/part_*/")
+    //     .map(t => PairWithCommonFriends(t.getAs[Int](0), t.getAs[Int](1), t.getAs[Int](2)))
+    //     .filter(pair => pair.person1 % 11 == 7 || pair.person2 % 11 == 7)
+    // }
+
+    // val testData = {
+    //   prepareData(testCommonFriendsCounts, positives, friend_masks, ageSexBC,cityRegBC)
+    //     .map(t => t._1 -> LabeledPoint(t._2._2.getOrElse(0.0), t._2._1))
+    //     .filter(t => t._2.label == 0.0)
+    // }
+
+    // // step 8
+    // val testPrediction = {
+    //   testData
+    //     .flatMap { case (id, LabeledPoint(label, features)) =>
+    //       val prediction = model.predict(features)
+    //       Seq(id._1 -> (id._2, prediction), id._2 -> (id._1, prediction))
+    //     }
+    //     .filter(t => t._1 % 11 == 7 && t._2._2 >= threshold)
+    //     .groupByKey(numPartitions)
+    //     .map(t => {
+    //       val user = t._1
+    //       val firendsWithRatings = t._2
+    //       val topBestFriends = firendsWithRatings.toList.sortBy(-_._2).take(100).map(x => x._1)
+    //       (user, topBestFriends)
+    //     })
+    //     .sortByKey(true, 1)
+    //     .map(t => t._1 + "\t" + t._2.mkString("\t"))
+    // }
+
+    // testPrediction.saveAsTextFile(predictionPath,  classOf[GzipCodec])
+
+    // println("model ROC = " + rocLogReg.toString)
   }
 }

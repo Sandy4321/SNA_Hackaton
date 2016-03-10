@@ -15,9 +15,11 @@ import scala.collection.mutable.ArrayBuffer
 
 
 
+
+
 object Data_test {
 
-  def main22(args: Array[String]) {
+  def main(args: Array[String]) {
 
     val sparkConf = new SparkConf()
       .setAppName("Baseline")
@@ -39,64 +41,20 @@ object Data_test {
     val numPartitionsGraph = 20
 
 
-    println (demographyPath)
-    val ageSex = {
-      sc.textFile(demographyPath)
-        .map(line => {
-          val lineSplit = line.trim().split("\t")
-          if (lineSplit(2) == "") {
-            (lineSplit(0).toInt -> AgeSex(0, lineSplit(3).toInt))
-          }
-          else {
-            (lineSplit(0).toInt -> AgeSex(lineSplit(2).toInt, lineSplit(3).toInt))
-          }
-        })
-    }
+    val xx = "%021d".format(0).takeRight(21).map(_.toString().toInt)
+    val xx2 = Vectors.dense(1,2,3).toArray.deep
+    val xx33 = Vectors.dense(Array(100, 1, 2))
+    //val xx3 = Vectors.dense("%021d".format(0).takeRight(21).map(_.toInt))
+
+    println (xx)
+    println (xx2)
+    println (xx2.union(xx))
+    println (xx3)
 
 
-    val CityReg = {
-        sc.textFile(demographyPath)
-          .map(line => {
-            val lineSplit = line.trim().split("\t")
-          if (lineSplit.length == 6) {
-            (lineSplit(0).toInt -> UserCity(lineSplit(5).toInt, 0))
-             }
-          else {
-            (lineSplit(0).toInt -> UserCity(lineSplit(5).toInt, lineSplit(6).toInt))
-          }
-
-          //if (lineSplit.length <3) {
-            //lineSplit.length
-          // if (lineSplit.length == 6 && lineSplit(2) == ""){
-
-          //   (lineSplit(0).toInt -> AgeSex(0, lineSplit(3).toInt))
-          // }
-          // else {
-          //   (lineSplit(0).toInt -> AgeSex(lineSplit(2).toInt, lineSplit(3).toInt))
-          // }
-
-        })
-
-     } 
 
 
-     val cityRegBC = sc.broadcast(CityReg.collectAsMap())
-
-
-     CityReg.collect()
-     CityReg.take(25).foreach(println)
-
-     println ("\n \n Some important text \n \n")
-
-     //  53918274
-     //  38140533
-     //  38140322
-     //  51287302
-     //  46029233 - (338.., 0)
-     //
-
-     val kk = cityRegBC.value.getOrElse(46029233, UserCity(-1, -1)).city_active 
-     println (kk)
+            
     }
 
 }
