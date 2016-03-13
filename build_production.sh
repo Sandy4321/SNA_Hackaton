@@ -1,3 +1,6 @@
+#!/bin/sh
+
+
 cd My_Model_scala/
 sbt package
 cd ..
