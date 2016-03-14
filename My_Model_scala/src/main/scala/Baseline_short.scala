@@ -306,7 +306,7 @@ object Baseline_short {
       }
     }
 
-    train_predictionAndLabels.toDF.write.parquet("Model_fin" + "/training")
+    train_predictionAndLabels.toDF.write.parquet(dataDir + "Model_fin" + "/training")
 
     // Computing Validation
     val predictionAndLabels = {
@@ -316,7 +316,7 @@ object Baseline_short {
       }
     }
 
-    predictionAndLabels.toDF.write.parquet("Model_fin" + "/validation")
+    predictionAndLabels.toDF.write.parquet(dataDir + "Model_fin" + "/validation")
 
 
 
@@ -356,7 +356,7 @@ object Baseline_short {
       }
     }
 
-    test_predictionAndLabels.toDF.write.parquet("Model_fin" + "/test")
+    test_predictionAndLabels.toDF.write.parquet(dataDir + "Model_fin" + "/test")
 
 
     // step 8
