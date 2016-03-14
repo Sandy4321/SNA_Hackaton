@@ -93,7 +93,7 @@ object Baseline_short {
               .replace(")}", "")
               .split("\\),\\(")
               //.map(t => t.split(",")(0).toInt)
-              .map(t => Friend(t.split(",")(0).toInt,int_mask_to_binary(t.split(",")(1).toInt)))
+              .map(t => Friend(t.split(",")(0).toInt,t.split(",")(1).toInt))
           }
           UserFriends2(user, friends)
         })
@@ -193,7 +193,9 @@ object Baseline_short {
             .flatMap(
               userFriends => userFriends.friends
                 .filter(x => (usersBC.value.contains(x.user) && x.user > userFriends.user))
-                .map(x => (userFriends.user, x.user) -> x.mask_bit)
+                .map(x => (userFriends.user, x.user) -> 
+                     {val k: Seq[Int] = int_mask_to_binary(x.mask_bit); 
+                     k})
             )
         }
 
@@ -306,7 +308,7 @@ object Baseline_short {
       }
     }
 
-    train_predictionAndLabels.toDF.write.parquet(dataDir + "Model_fin" + "/training")
+    train_predictionAndLabels.toDF.repartition(1).write.parquet(dataDir + "Model_fin" + "/training")
 
     // Computing Validation
     val predictionAndLabels = {
@@ -316,7 +318,7 @@ object Baseline_short {
       }
     }
 
-    predictionAndLabels.toDF.write.parquet(dataDir + "Model_fin" + "/validation")
+    predictionAndLabels.toDF.repartition(4).write.parquet(dataDir + "Model_fin" + "/validation")
 
 
 
@@ -356,7 +358,7 @@ object Baseline_short {
       }
     }
 
-    test_predictionAndLabels.toDF.write.parquet(dataDir + "Model_fin" + "/test")
+    test_predictionAndLabels.toDF.repartition(8).write.parquet(dataDir + "Model_fin" + "/test")
 
 
     // step 8

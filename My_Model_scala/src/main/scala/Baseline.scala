@@ -25,7 +25,7 @@ import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.SQLContext
 import org.apache.spark.{SparkConf, SparkContext}
 import org.apache.spark.mllib.feature.StandardScaler
-
+import org.apache.spark.sql.Row
 
 import scala.collection.mutable.ArrayBuffer
 
@@ -33,9 +33,8 @@ case class PairWithCommonFriends(person1: Int, person2: Int, commonFriendsCount:
 case class UserFriends(user: Int, friends: Array[Int])
 case class AgeSex(age: Int, sex: Int)
 case class UserCity(city: Int, city_active: Int)
-
 case class RocVals(reg_par: Double, roc_val: Double)
-case class Friend(user: Int, mask_bit: Seq[Int])
+case class Friend(user: Int, mask_bit: Int)
 case class UserFriends2(user: Int, friends: Array[Friend])
 
 object Baseline {
@@ -97,13 +96,13 @@ object Baseline {
               .replace(")}", "")
               .split("\\),\\(")
               //.map(t => t.split(",")(0).toInt)
-              .map(t => Friend(t.split(",")(0).toInt,int_mask_to_binary(t.split(",")(1).toInt)))
+              .map(t => Friend(t.split(",")(0).toInt,t.split(",")(1).toInt))
           }
           UserFriends2(user, friends)
         })
     }
 
-
+    
 
 
     // step 1.a from description
@@ -245,10 +244,11 @@ object Baseline {
             .flatMap(
               userFriends => userFriends.friends
                 .filter(x => (usersBC.value.contains(x.user) && x.user > userFriends.user))
-                .map(x => (userFriends.user, x.user) -> x.mask_bit)
+                .map(x => (userFriends.user, x.user) -> 
+                    {val k: Seq[Int] = int_mask_to_binary(x.mask_bit); 
+                     k})
             )
         }
-
 
 
 
