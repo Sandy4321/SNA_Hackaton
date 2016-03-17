@@ -27,8 +27,12 @@ import org.apache.spark.{SparkConf, SparkContext}
 import org.apache.spark.mllib.feature.StandardScaler
 import org.apache.spark.sql.Row
 
+import org.apache.spark.sql.Row
 import scala.collection.mutable.ArrayBuffer
+import org.apache.spark.mllib.feature.PCA
 
+
+case class SimplePair(person1: Int, person2: Int)
 case class PairWithCommonFriends(person1: Int, person2: Int, commonFriendsCount: Int)
 case class UserFriends(user: Int, friends: Array[Int])
 case class AgeSex(age: Int, sex: Int)
