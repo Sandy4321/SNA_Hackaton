@@ -57,39 +57,39 @@ object Map_bin_test {
 
 
 
-    // val graph = {
-    //   sc.textFile(graphPath)
-    //     .map(line => {
-    //       val lineSplit = line.split("\t")
-    //       val user = lineSplit(0).toInt
-    //       val friends = {
-    //         lineSplit(1)
-    //           .replace("{(", "")
-    //           .replace(")}", "")
-    //           .split("\\),\\(")
-    //           //.map(t => t.split(",")(0).toInt)
-    //           .map(t => Friend(t.split(",")(0).toInt,t.split(",")(1).toInt))
-    //       }
-    //       UserFriends2(user, friends)
-    //     })
-    // }
+    val graph = {
+      sc.textFile(graphPath)
+        .map(line => {
+          val lineSplit = line.split("\t")
+          val user = lineSplit(0).toInt
+          val friends = {
+            lineSplit(1)
+              .replace("{(", "")
+              .replace(")}", "")
+              .split("\\),\\(")
+              //.map(t => t.split(",")(0).toInt)
+              .map(t => Friend(t.split(",")(0).toInt,t.split(",")(1).toInt))
+          }
+          UserFriends2(user, friends)
+        })
+    }
 
 
 
 
 
-    // //step 1.a from description
-    // graph
-    //   .filter(userFriends => userFriends.friends.length >= 8 && userFriends.friends.length <= 1000)
-    //   .flatMap(userFriends => userFriends.friends.map(x => (x.user, (userFriends.user,x.mask_bit))))  // making new key
-    //   .groupByKey(numPartitions)          // number of groups that will be created after partitioning
-    //   .map(t => (t._1, t._2.toArray))
-    //   .map(t => t._2)
-    //   .filter(friends => friends.length >= 2 && friends.length <= 2000)
-    //   .map(friends => new Tuple1(friends))      
-    //   .toDF
-    //   //.take(50).map(t => println(t))
-    //   .write.parquet(reversedGraphPath + "_bin_map")
+    //step 1.a from description
+    graph
+      .filter(userFriends => userFriends.friends.length >= 8 && userFriends.friends.length <= 1000)
+      .flatMap(userFriends => userFriends.friends.map(x => (x.user, (userFriends.user,x.mask_bit))))  // making new key
+      .groupByKey(numPartitions)          // number of groups that will be created after partitioning
+      .map(t => (t._1, t._2.toArray))
+      .map(t => t._2)
+      .filter(friends => friends.length >= 2 && friends.length <= 2000)
+      .map(friends => new Tuple1(friends))      
+      .toDF
+      //.take(50).map(t => println(t))
+      .write.parquet(reversedGraphPath + "_bin_map")
 
 
 
@@ -149,24 +149,7 @@ object Map_bin_test {
 
 
 
-
     val numPartitionsGraph: Int = 15
-
-    // val k: Int = 0
-    // sqlc.read.parquet(reversedGraphPath + "_bin_map")
-    //               .map(t => t.getAs[Seq[Row]](0).map{case Row(k: Int, v: Int) => (k, v)}.toSeq)
-
-    //               .map(t => generatePairs_v2(t, numPartitionsGraph, k))
-    //               .flatMap(pair => pair.map(x => (x._1._1,x._2._1) -> (x._1._2,x._2._2)))
-    //               .map(x => x._1-> pairs_binary_count(x._2._1,x._2._2))
-
-    //               .reduceByKey((x, y) => x + y)
-    //               .filter (x => x._2(253)>5)
-    //               .map (x => x._1 -> x._2.slice(1, 253))
-    //               .take(30).map(t => println(t))
-
-
-
 
 
     for (k <- 0 until numPartitionsGraph) {
@@ -181,7 +164,7 @@ object Map_bin_test {
                   .reduceByKey((x, y) => x + y)
                   .filter (x => x._2(253)>5)
                   .map (x => x._1 -> x._2.slice(1, 253))
-                  .map(x => new Tuple1(x._1._1, x._1._2, x._2.toArray.toSeq))
+                  .map(x => PairWithCommonFriendsAndFriendMask(x._1._1, x._1._2, x._2.toArray))
                   //.map (x => DenseVector(x._1._1,x._1._1) :+ x._2)
                   //.map (x => Tuple1(x._1._1,x._1._2))
                   //.take(50)
@@ -189,40 +172,32 @@ object Map_bin_test {
         }
 
 
-        commonFriendsCounts.toDF.repartition(4).write.parquet(commonFriendsPath + "_bin_map" + "/part_" + k)
+         commonFriendsCounts.toDF.repartition(4).write.parquet(commonFriendsPath + "_bin_map" + "/part_" + k)
+     }
+
+
+    val commonFriendsCounts_bin_mask = {
+            sqlc
+                .read.parquet(commonFriendsPath + "_bin_map" + "/part_*")
+                .map(row =>
+                    (row.getAs[Int](0),
+                    row.getAs[Int](1)) ->
+                    Vectors.dense(row.getAs[Seq[Short]](2).toArray.map(_.toDouble)))
+            }
+
+
+
+    val pca = new PCA(10).fit(commonFriendsCounts_bin_mask.map(t => t._2))
+
+    val projected_bin_mask = commonFriendsCounts_bin_mask.map(p => p._1 -> pca.transform(p._2).toArray)
+
+    def prepareData22( projected_bin_mask: RDD[((Int,Int), Array[Double])]) = {
+         1
     }
 
-
-    // val commonFriendsCounts_bin_map = {
-    //         sqlc
-    //             .read.parquet(commonFriendsPath + "_bin_map" + "/part_*")
-    //             .map(row =>
-    //             {val key = row.getAs[Tuple(Int,Int)](0)
+    println(prepareData22 (projected_bin_mask))
 
 
-    //                 // {row(0)   match {
-    //                 //                      case Row(k: Int, v:Int) => 
-    //                 //                             {SimplePair(k,v)} //ArrayBuffer(k.toInt,v.toInt)
-    //                 //                      case _ => 0}} 
-    //             val value = row.getAs[Seq[Short]](1).toArray.map(_.toDouble)
-    //             key -> value})
-    //             //.map (t => t._1._1)
-
-    //             .take(50)
-    //             .map (t => println(t))
-    //         }
-
-
-
-    // def prepareData22( projected_bin_mask: RDD[((Int,Int), Array[Double])]) = {
-    //     1
-    // }
-
-    //println(prepareData22 (commonFriendsCounts_bin_map))
-
-    //val pca = new PCA(10).fit(commonFriendsCounts_bin_map.map(t => t._2))
-
-    //val projected_bin_mask = commonFriendsCounts_bin_map.map(p => p._1 -> pca.transform(p._2))
 
 
 

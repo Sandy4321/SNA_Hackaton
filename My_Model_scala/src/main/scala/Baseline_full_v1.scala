@@ -12,7 +12,7 @@
 
    */
 
-
+import breeze.linalg.DenseVector
 import breeze.numerics.abs
 import org.apache.hadoop.io.compress.GzipCodec
 import org.apache.spark.broadcast.Broadcast
@@ -32,17 +32,7 @@ import scala.collection.mutable.ArrayBuffer
 import org.apache.spark.mllib.feature.PCA
 
 
-case class SimplePair(person1: Int, person2: Int)
-case class PairWithCommonFriendsAndFriendMask(person1: Int, person2: Int, commonFriendsCount: Array[Short])
-case class PairWithCommonFriends(person1: Int, person2: Int, commonFriendsCount: Int)
-case class UserFriends(user: Int, friends: Array[Int])
-case class AgeSex(age: Int, sex: Int)
-case class UserCity(city: Int, city_active: Int)
-case class RocVals(reg_par: Double, roc_val: Double)
-case class Friend(user: Int, mask_bit: Int)
-case class UserFriends2(user: Int, friends: Array[Friend])
-
-object Baseline {
+object Baseline_full_v1 {
 
   def main(args: Array[String]) {
 
@@ -154,8 +144,95 @@ object Baseline {
       commonFriendsCounts.toDF.repartition(4).write.parquet(commonFriendsPath + "/part_" + k)
     }
 
-    // prepare data for training model
+
+
+    // Generating mask PCA variables
     // step 2
+
+  def generatePairs_v2(pplWithCommonFriends: Seq[(Int,Int)], numPartitions: Int, k: Int) = {
+      val pairs = ArrayBuffer.empty[((Int,Int), (Int,Int))]
+      for (i <- 0 until pplWithCommonFriends.length) {
+        if (pplWithCommonFriends(i)._1 % numPartitions == k) {
+          for (j <- i + 1 until pplWithCommonFriends.length) {
+            pairs.append((pplWithCommonFriends(i), pplWithCommonFriends(j)))
+          }
+        }
+      }
+      pairs
+    }
+
+
+    def pairs_binary_count(binmap_person_1: Int, binmap_person_2: Int) = {
+
+        def bin1 = int_mask_to_binary(binmap_person_1)
+        def bin2 = int_mask_to_binary(binmap_person_2)
+        val bin1_arr = ArrayBuffer.empty[Int]
+        val bin2_arr = ArrayBuffer.empty[Int]
+        var sum_bins =  Array.fill[Short](11*23)(0) //Vectors.zeros (11*23) // DenseVector.zeros[Short](12*23) //
+
+        //  println(bin1)
+        //  println(bin2)
+
+        for (i<-1 until 22) {
+            if (bin1(21-i) ==1)
+                bin1_arr.append(i)
+            if (bin2(21-i) ==1)
+                bin2_arr.append(i)
+            }
+
+        if (bin1_arr.length ==0) bin1_arr.append(0)
+        if (bin2_arr.length ==0) bin2_arr.append(0)
+
+        // (bin1_arr)
+        //println (bin2_arr)
+
+        for (i<-0 until bin1_arr.length){
+            for (j<-0 until bin2_arr.length){
+               if (bin1_arr(i)>= bin2_arr(j)) 
+                    sum_bins (bin1_arr(i) + 22 * bin2_arr(j) - (bin2_arr(j) * (bin2_arr(j)+1))/2) = 1
+                else
+                    sum_bins (bin2_arr(j) + 22 * bin1_arr(i) - (bin1_arr(i) * (bin1_arr(i)+1))/2) = 1
+            }
+        }
+
+        //sum_bins :+ 1.toShort
+        new DenseVector(sum_bins :+ 1.toShort)  // Last element added for counting purposes
+
+    }
+
+
+
+    for (k <- 0 until numPartitionsGraph) {
+        val commonFriendsCounts = {
+            sqlc.read.parquet(reversedGraphPath + "_bin_map")
+                  .map(t => t.getAs[Seq[Row]](0).map{case Row(k: Int, v: Int) => (k, v)}.toSeq)
+
+                  .map(t => generatePairs_v2(t, numPartitionsGraph, k))
+                  .flatMap(pair => pair.map(x => (x._1._1,x._2._1) -> (x._1._2,x._2._2)))
+                  .map(x => x._1-> pairs_binary_count(x._2._1,x._2._2))
+
+                  .reduceByKey((x, y) => x + y)
+                  .filter (x => x._2(253)>5)
+                  .map (x => x._1 -> x._2.slice(1, 253))
+                  .map(x => PairWithCommonFriendsAndFriendMask(x._1._1, x._1._2, x._2.toArray))
+        }
+         commonFriendsCounts.toDF.repartition(4).write.parquet(commonFriendsPath + "_bin_map" + "/part_" + k)
+     }
+
+
+  val commonFriendsCounts_bin_mask = {
+            sqlc
+                .read.parquet(commonFriendsPath + "_bin_map" + "/part_*")
+                .map(row =>
+                    (row.getAs[Int](0),
+                    row.getAs[Int](1)) ->
+                    Vectors.dense(row.getAs[Seq[Short]](2).toArray.map(_.toDouble)))
+            }
+
+    val pca = new PCA(10).fit(commonFriendsCounts_bin_mask.map(t => t._2))
+
+    val projected_bin_mask = commonFriendsCounts_bin_mask.map(p => p._1 -> pca.transform(p._2).toArray)
+
 
 
 
@@ -262,11 +339,15 @@ object Baseline {
                      commonFriendsCounts: RDD[PairWithCommonFriends],
                      positives: RDD[((Int, Int), Double)],
                      friend_masks: RDD[((Int, Int), Seq[Int])],
+                     projected_bin_mask: RDD[((Int, Int), Array[Double])],
                      ageSexBC:  Broadcast[scala.collection.Map[Int, AgeSex ]],
                      cityRegBC: Broadcast[scala.collection.Map[Int, UserCity]],
                      friendscountBC: Broadcast[scala.collection.Map[Int, Int]]) = {
 
       val zero_fr_masks_lst = "%021d".format(0).takeRight(21).map(_.toString().toInt)
+      val zero_masks_pca = "%010d".format(0).takeRight(10).map(_.toString().toInt).toArray
+
+      
       commonFriendsCounts
         .map(pair => (pair.person1, pair.person2) -> (Vectors.dense(
           pair.commonFriendsCount.toDouble,
@@ -301,6 +382,11 @@ object Baseline {
         .leftOuterJoin(friend_masks)
         .map(x => x._1 -> (x._2._1.toArray.deep.union(x._2._2.getOrElse(zero_fr_masks_lst))))  // join with friend_masks
         .map(x => x._1 -> (Vectors.dense(x._2.toArray.map({l => l.toString().toDouble}))))  // convert back to vector_dense
+  
+        .leftOuterJoin(projected_bin_mask)
+        .map(x => x._1 -> (x._2._1.toArray.deep.union(x._2._2.getOrElse(zero_masks_pca))))  // join with friend_masks
+        .map(x => x._1 -> (Vectors.dense(x._2.toArray.map({l => l.toString().toDouble}))))  // convert back to vector_dense
+
         .leftOuterJoin(positives)
         
     }
@@ -310,7 +396,7 @@ object Baseline {
     // if point class is not positive than we make it zero
     //
     val data = {
-      prepareData(commonFriendsCounts, positives, friend_masks, ageSexBC, cityRegBC, friendscountBC)
+      prepareData(commonFriendsCounts, positives, friend_masks, projected_bin_mask, ageSexBC, cityRegBC, friendscountBC)
         .map(t => LabeledPoint(t._2._2.getOrElse(0.0), t._2._1))
     }
 
@@ -375,7 +461,7 @@ object Baseline {
     }
 
     val testData = {
-      prepareData(testCommonFriendsCounts, positives, friend_masks, ageSexBC,cityRegBC,friendscountBC)
+      prepareData(testCommonFriendsCounts, positives, friend_masks, projected_bin_mask, ageSexBC,cityRegBC,friendscountBC)
         .map(t => t._1 -> LabeledPoint(t._2._2.getOrElse(0.0), t._2._1))
         .filter(t => t._2.label == 0.0)
         .map(t => t._1 -> LabeledPoint(t._2.label, scaler1.transform(t._2.features)))
