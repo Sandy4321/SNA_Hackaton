@@ -4,13 +4,11 @@
 cd My_Model_scala/
 sbt package
 cd ..
-
-
-rm -rf Data_short/trainSubReversedGraph/
-rm -rf Data_short/LogisticRegressionModel/
-rm -rf Data_short/prediction/
-rm -rf Data_short/commonFriendsCountsPartitioned/
-rm -rf Data_short/trainSubReversedGraph_bin_map/
+rm -rf Data/trainSubReversedGraph/
+rm -rf Data/LogisticRegressionModel/
+rm -rf Data/prediction/
+rm -rf Data/commonFriendsCountsPartitioned/
+rm -rf Data/trainSubReversedGraph_bin_map/
 rm -rf Data_short/commonFriendsCountsPartitioned_bin_map
 
 

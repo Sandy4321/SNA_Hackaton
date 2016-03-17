@@ -52,9 +52,9 @@ object Baseline_full_v1 {
     val predictionPath = dataDir + "prediction"
     val modelPath = dataDir + "LogisticRegressionModel"
     val numPartitions = 200
-    val numPartitionsGraph = 107
+    //val numPartitionsGraph = 107
 
-    //  val numPartitionsGraph = 10
+    val numPartitionsGraph = 10
 
     //
     // https://habrahabr.ru/company/odnoklassniki/blog/277527/
@@ -146,8 +146,22 @@ object Baseline_full_v1 {
 
 
 
+
     // Generating mask PCA variables
     // step 2
+    graph
+      .filter(userFriends => userFriends.friends.length >= 8 && userFriends.friends.length <= 1000)
+      .flatMap(userFriends => userFriends.friends.map(x => (x.user, (userFriends.user,x.mask_bit))))  // making new key
+      .groupByKey(numPartitions)          // number of groups that will be created after partitioning
+      .map(t => (t._1, t._2.toArray))
+      .map(t => t._2)
+      .filter(friends => friends.length >= 2 && friends.length <= 2000)
+      .map(friends => new Tuple1(friends))      
+      .toDF
+      //.take(50).map(t => println(t))
+      .write.parquet(reversedGraphPath + "_bin_map")
+
+
 
   def generatePairs_v2(pplWithCommonFriends: Seq[(Int,Int)], numPartitions: Int, k: Int) = {
       val pairs = ArrayBuffer.empty[((Int,Int), (Int,Int))]
@@ -229,7 +243,7 @@ object Baseline_full_v1 {
                     Vectors.dense(row.getAs[Seq[Short]](2).toArray.map(_.toDouble)))
             }
 
-    val pca = new PCA(10).fit(commonFriendsCounts_bin_mask.map(t => t._2))
+    val pca = new PCA(20).fit(commonFriendsCounts_bin_mask.map(t => t._2))
 
     val projected_bin_mask = commonFriendsCounts_bin_mask.map(p => p._1 -> pca.transform(p._2).toArray)
 
@@ -345,9 +359,9 @@ object Baseline_full_v1 {
                      friendscountBC: Broadcast[scala.collection.Map[Int, Int]]) = {
 
       val zero_fr_masks_lst = "%021d".format(0).takeRight(21).map(_.toString().toInt)
-      val zero_masks_pca = "%010d".format(0).takeRight(10).map(_.toString().toInt).toArray
+      val zero_masks_pca = "%020d".format(0).takeRight(20).map(_.toString().toInt).toArray
 
-      
+
       commonFriendsCounts
         .map(pair => (pair.person1, pair.person2) -> (Vectors.dense(
           pair.commonFriendsCount.toDouble,
@@ -379,9 +393,9 @@ object Baseline_full_v1 {
           ))
 
         )
-        .leftOuterJoin(friend_masks)
-        .map(x => x._1 -> (x._2._1.toArray.deep.union(x._2._2.getOrElse(zero_fr_masks_lst))))  // join with friend_masks
-        .map(x => x._1 -> (Vectors.dense(x._2.toArray.map({l => l.toString().toDouble}))))  // convert back to vector_dense
+        // .leftOuterJoin(friend_masks)
+        // .map(x => x._1 -> (x._2._1.toArray.deep.union(x._2._2.getOrElse(zero_fr_masks_lst))))  // join with friend_masks
+        // .map(x => x._1 -> (Vectors.dense(x._2.toArray.map({l => l.toString().toDouble}))))  // convert back to vector_dense
   
         .leftOuterJoin(projected_bin_mask)
         .map(x => x._1 -> (x._2._1.toArray.deep.union(x._2._2.getOrElse(zero_masks_pca))))  // join with friend_masks
@@ -494,5 +508,22 @@ object Baseline_full_v1 {
     println ("positives" + (y_positive*1.0/(y_positive+y_negative)).toString)
     println ("negatives" + (y_negative*1.0/(y_positive+y_negative)).toString)
 
+
+  def printToFile(f: java.io.File)(op: java.io.PrintWriter => Unit) {
+    val p = new java.io.PrintWriter(f)
+    try { op(p) } finally { p.close() }
+  }
+
+  import java.io._
+  val datastr = Array("model ROC = " + rocLogReg.toString,
+                   "positives" + y_positive.toString,
+                   "negatives" + y_negative.toString,
+                   "positives" + (y_positive*1.0/(y_positive+y_negative)).toString,
+                   "negatives" + (y_negative*1.0/(y_positive+y_negative)).toString)
+
+
+  printToFile(new File(dataDir + "example.txt")) { p =>
+          datastr.foreach(p.println)
+        }
   }
 }
