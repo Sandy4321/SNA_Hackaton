@@ -55,6 +55,9 @@ object Baseline_full_v1 {
     //val numPartitionsGraph = 107
 
     val numPartitionsGraph = 10
+    val PCAsize = 47      //  best size is 51
+    val create_counters = true
+
 
     //
     // https://habrahabr.ru/company/odnoklassniki/blog/277527/
@@ -98,20 +101,20 @@ object Baseline_full_v1 {
     }
 
     
+    if (create_counters) {
 
-
-    // step 1.a from description
-    graph
-      .filter(userFriends => userFriends.friends.length >= 8 && userFriends.friends.length <= 1000)
-      .flatMap(userFriends => userFriends.friends.map(x => (x.user, userFriends.user)))  // making new key
-      .groupByKey(numPartitions)          // number of groups that will be created after partitioning
-      .map(t => UserFriends(t._1, t._2.toArray))
-      .map(userFriends => userFriends.friends.sorted)
-      .filter(friends => friends.length >= 2 && friends.length <= 2000)
-      .map(friends => new Tuple1(friends))
-      .toDF
-      .write.parquet(reversedGraphPath)
-
+        // step 1.a from description
+        graph
+          .filter(userFriends => userFriends.friends.length >= 8 && userFriends.friends.length <= 1000)
+          .flatMap(userFriends => userFriends.friends.map(x => (x.user, userFriends.user)))  // making new key
+          .groupByKey(numPartitions)          // number of groups that will be created after partitioning
+          .map(t => UserFriends(t._1, t._2.toArray))
+          .map(userFriends => userFriends.friends.sorted)
+          .filter(friends => friends.length >= 2 && friends.length <= 2000)
+          .map(friends => new Tuple1(friends))
+          .toDF
+          .write.parquet(reversedGraphPath)
+    }
 
 
     // for each pair of plp count the amount of their common friends
@@ -131,107 +134,111 @@ object Baseline_full_v1 {
       pairs
     }
 
-    for (k <- 0 until numPartitionsGraph) {
-      val commonFriendsCounts = {
-        sqlc.read.parquet(reversedGraphPath)
-          .map(t => generatePairs(t.getAs[Seq[Int]](0), numPartitionsGraph, k))
-          .flatMap(pair => pair.map(x => x -> 1))
-          .reduceByKey((x, y) => x + y)
-          .map(t => PairWithCommonFriends(t._1._1, t._1._2, t._2))
-          .filter(pair => pair.commonFriendsCount > 8)
-      }
 
-      commonFriendsCounts.toDF.repartition(4).write.parquet(commonFriendsPath + "/part_" + k)
-    }
+    if (create_counters) {
 
+                  for (k <- 0 until numPartitionsGraph) {
+                    val commonFriendsCounts = {
+                      sqlc.read.parquet(reversedGraphPath)
+                        .map(t => generatePairs(t.getAs[Seq[Int]](0), numPartitionsGraph, k))
+                        .flatMap(pair => pair.map(x => x -> 1))
+                        .reduceByKey((x, y) => x + y)
+                        .map(t => PairWithCommonFriends(t._1._1, t._1._2, t._2))
+                        .filter(pair => pair.commonFriendsCount > 8)
+                    }
 
-
-
-    // Generating mask PCA variables
-    // step 2
-    graph
-      .filter(userFriends => userFriends.friends.length >= 8 && userFriends.friends.length <= 1000)
-      .flatMap(userFriends => userFriends.friends.map(x => (x.user, (userFriends.user,x.mask_bit))))  // making new key
-      .groupByKey(numPartitions)          // number of groups that will be created after partitioning
-      .map(t => (t._1, t._2.toArray))
-      .map(t => t._2)
-      .filter(friends => friends.length >= 2 && friends.length <= 2000)
-      .map(friends => new Tuple1(friends))      
-      .toDF
-      //.take(50).map(t => println(t))
-      .write.parquet(reversedGraphPath + "_bin_map")
+                    commonFriendsCounts.toDF.repartition(4).write.parquet(commonFriendsPath + "/part_" + k)
+                  }
 
 
 
-  def generatePairs_v2(pplWithCommonFriends: Seq[(Int,Int)], numPartitions: Int, k: Int) = {
-      val pairs = ArrayBuffer.empty[((Int,Int), (Int,Int))]
-      for (i <- 0 until pplWithCommonFriends.length) {
-        if (pplWithCommonFriends(i)._1 % numPartitions == k) {
-          for (j <- i + 1 until pplWithCommonFriends.length) {
-            pairs.append((pplWithCommonFriends(i), pplWithCommonFriends(j)))
-          }
-        }
-      }
-      pairs
-    }
 
-
-    def pairs_binary_count(binmap_person_1: Int, binmap_person_2: Int) = {
-
-        def bin1 = int_mask_to_binary(binmap_person_1)
-        def bin2 = int_mask_to_binary(binmap_person_2)
-        val bin1_arr = ArrayBuffer.empty[Int]
-        val bin2_arr = ArrayBuffer.empty[Int]
-        var sum_bins =  Array.fill[Short](11*23)(0) //Vectors.zeros (11*23) // DenseVector.zeros[Short](12*23) //
-
-        //  println(bin1)
-        //  println(bin2)
-
-        for (i<-1 until 22) {
-            if (bin1(21-i) ==1)
-                bin1_arr.append(i)
-            if (bin2(21-i) ==1)
-                bin2_arr.append(i)
-            }
-
-        if (bin1_arr.length ==0) bin1_arr.append(0)
-        if (bin2_arr.length ==0) bin2_arr.append(0)
-
-        // (bin1_arr)
-        //println (bin2_arr)
-
-        for (i<-0 until bin1_arr.length){
-            for (j<-0 until bin2_arr.length){
-               if (bin1_arr(i)>= bin2_arr(j)) 
-                    sum_bins (bin1_arr(i) + 22 * bin2_arr(j) - (bin2_arr(j) * (bin2_arr(j)+1))/2) = 1
-                else
-                    sum_bins (bin2_arr(j) + 22 * bin1_arr(i) - (bin1_arr(i) * (bin1_arr(i)+1))/2) = 1
-            }
-        }
-
-        //sum_bins :+ 1.toShort
-        new DenseVector(sum_bins :+ 1.toShort)  // Last element added for counting purposes
-
-    }
+              // Generating mask PCA variables
+              // step 2
+              graph
+                .filter(userFriends => userFriends.friends.length >= 8 && userFriends.friends.length <= 1000)
+                .flatMap(userFriends => userFriends.friends.map(x => (x.user, (userFriends.user,x.mask_bit))))  // making new key
+                .groupByKey(numPartitions)          // number of groups that will be created after partitioning
+                .map(t => (t._1, t._2.toArray))
+                .map(t => t._2)
+                .filter(friends => friends.length >= 2 && friends.length <= 2000)
+                .map(friends => new Tuple1(friends))      
+                .toDF
+                //.take(50).map(t => println(t))
+                .write.parquet(reversedGraphPath + "_bin_map")
 
 
 
-    for (k <- 0 until numPartitionsGraph) {
-        val commonFriendsCounts = {
-            sqlc.read.parquet(reversedGraphPath + "_bin_map")
-                  .map(t => t.getAs[Seq[Row]](0).map{case Row(k: Int, v: Int) => (k, v)}.toSeq)
+            def generatePairs_v2(pplWithCommonFriends: Seq[(Int,Int)], numPartitions: Int, k: Int) = {
+                val pairs = ArrayBuffer.empty[((Int,Int), (Int,Int))]
+                for (i <- 0 until pplWithCommonFriends.length) {
+                  if (pplWithCommonFriends(i)._1 % numPartitions == k) {
+                    for (j <- i + 1 until pplWithCommonFriends.length) {
+                      pairs.append((pplWithCommonFriends(i), pplWithCommonFriends(j)))
+                    }
+                  }
+                }
+                pairs
+              }
 
-                  .map(t => generatePairs_v2(t, numPartitionsGraph, k))
-                  .flatMap(pair => pair.map(x => (x._1._1,x._2._1) -> (x._1._2,x._2._2)))
-                  .map(x => x._1-> pairs_binary_count(x._2._1,x._2._2))
 
-                  .reduceByKey((x, y) => x + y)
-                  .filter (x => x._2(253)>5)
-                  .map (x => x._1 -> x._2.slice(1, 253))
-                  .map(x => PairWithCommonFriendsAndFriendMask(x._1._1, x._1._2, x._2.toArray))
-        }
-         commonFriendsCounts.toDF.repartition(4).write.parquet(commonFriendsPath + "_bin_map" + "/part_" + k)
-     }
+              def pairs_binary_count(binmap_person_1: Int, binmap_person_2: Int) = {
+
+                  def bin1 = int_mask_to_binary(binmap_person_1)
+                  def bin2 = int_mask_to_binary(binmap_person_2)
+                  val bin1_arr = ArrayBuffer.empty[Int]
+                  val bin2_arr = ArrayBuffer.empty[Int]
+                  var sum_bins =  Array.fill[Short](11*23)(0) //Vectors.zeros (11*23) // DenseVector.zeros[Short](12*23) //
+
+                  //  println(bin1)
+                  //  println(bin2)
+
+                  for (i<-1 until 22) {
+                      if (bin1(21-i) ==1)
+                          bin1_arr.append(i)
+                      if (bin2(21-i) ==1)
+                          bin2_arr.append(i)
+                      }
+
+                  if (bin1_arr.length ==0) bin1_arr.append(0)
+                  if (bin2_arr.length ==0) bin2_arr.append(0)
+
+                  // (bin1_arr)
+                  //println (bin2_arr)
+
+                  for (i<-0 until bin1_arr.length){
+                      for (j<-0 until bin2_arr.length){
+                         if (bin1_arr(i)>= bin2_arr(j)) 
+                              sum_bins (bin1_arr(i) + 22 * bin2_arr(j) - (bin2_arr(j) * (bin2_arr(j)+1))/2) = 1
+                          else
+                              sum_bins (bin2_arr(j) + 22 * bin1_arr(i) - (bin1_arr(i) * (bin1_arr(i)+1))/2) = 1
+                      }
+                  }
+
+                  //sum_bins :+ 1.toShort
+                  new DenseVector(sum_bins :+ 1.toShort)  // Last element added for counting purposes
+
+              }
+
+
+
+              for (k <- 0 until numPartitionsGraph) {
+                  val commonFriendsCounts = {
+                      sqlc.read.parquet(reversedGraphPath + "_bin_map")
+                            .map(t => t.getAs[Seq[Row]](0).map{case Row(k: Int, v: Int) => (k, v)}.toSeq)
+
+                            .map(t => generatePairs_v2(t, numPartitionsGraph, k))
+                            .flatMap(pair => pair.map(x => (x._1._1,x._2._1) -> (x._1._2,x._2._2)))
+                            .map(x => x._1-> pairs_binary_count(x._2._1,x._2._2))
+
+                            .reduceByKey((x, y) => x + y)
+                            .filter (x => x._2(253)>5)
+                            .map (x => x._1 -> x._2.slice(1, 253))
+                            .map(x => PairWithCommonFriendsAndFriendMask(x._1._1, x._1._2, x._2.toArray))
+                  }
+                   commonFriendsCounts.toDF.repartition(4).write.parquet(commonFriendsPath + "_bin_map" + "/part_" + k)
+               }
+   }
 
 
   val commonFriendsCounts_bin_mask = {
@@ -243,7 +250,7 @@ object Baseline_full_v1 {
                     Vectors.dense(row.getAs[Seq[Short]](2).toArray.map(_.toDouble)))
             }
 
-    val pca = new PCA(20).fit(commonFriendsCounts_bin_mask.map(t => t._2))
+    val pca = new PCA(PCAsize).fit(commonFriendsCounts_bin_mask.map(t => t._2))
 
     val projected_bin_mask = commonFriendsCounts_bin_mask.map(p => p._1 -> pca.transform(p._2).toArray)
 
@@ -278,7 +285,7 @@ object Baseline_full_v1 {
     //  **** Random Sampling ****
     //
 
-    val sample_filter_val = 1.0 / numPartitionsGraph * 2.5  // make sample size 20% larger than size of the partition
+    val sample_filter_val = 1.0 / numPartitionsGraph * 10  // make sample size 20% larger than size of the partition
     // take 100% of ones and 25% of zeros
     val fractions: Map[AnyVal, Double] = Map(0 -> 0.25, 1.0 -> 1)
 
@@ -359,7 +366,7 @@ object Baseline_full_v1 {
                      friendscountBC: Broadcast[scala.collection.Map[Int, Int]]) = {
 
       val zero_fr_masks_lst = "%021d".format(0).takeRight(21).map(_.toString().toInt)
-      val zero_masks_pca = "%020d".format(0).takeRight(20).map(_.toString().toInt).toArray
+      val zero_masks_pca = "%0250d".format(0).takeRight(PCAsize).map(_.toString().toInt).toArray
 
 
       commonFriendsCounts
@@ -449,7 +456,7 @@ object Baseline_full_v1 {
 
 
     model.clearThreshold()
-    model.save(sc, modelPath)
+    //model.save(sc, modelPath)
 
     val predictionAndLabels = {
       validation.map { case LabeledPoint(label, features) =>
@@ -500,7 +507,7 @@ object Baseline_full_v1 {
         .map(t => t._1 + "\t" + t._2.mkString("\t"))
     }
 
-    testPrediction.saveAsTextFile(predictionPath,  classOf[GzipCodec])
+    // testPrediction.saveAsTextFile(predictionPath,  classOf[GzipCodec])
 
     println("model ROC = " + rocLogReg.toString)
     println ("positives" + y_positive.toString)
@@ -513,17 +520,25 @@ object Baseline_full_v1 {
     val p = new java.io.PrintWriter(f)
     try { op(p) } finally { p.close() }
   }
+  import java.util.Calendar
+  val today = Calendar.getInstance.getTime
+
 
   import java.io._
-  val datastr = Array("model ROC = " + rocLogReg.toString,
+  val datastr = Array("PCA size: " + PCAsize.toString,
+                   "Sample filter: " + sample_filter_val.toString,
+                   "",
+                   "model ROC = " + rocLogReg.toString,
                    "positives" + y_positive.toString,
                    "negatives" + y_negative.toString,
                    "positives" + (y_positive*1.0/(y_positive+y_negative)).toString,
                    "negatives" + (y_negative*1.0/(y_positive+y_negative)).toString)
 
 
-  printToFile(new File(dataDir + "example.txt")) { p =>
+  printToFile(new File(dataDir + "example_"+today.toString+".txt")) { p =>
           datastr.foreach(p.println)
         }
+  
+
   }
 }
