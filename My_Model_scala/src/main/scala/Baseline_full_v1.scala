@@ -285,7 +285,7 @@ object Baseline_full_v1 {
     //  **** Random Sampling ****
     //
 
-    val sample_filter_val = 1.0 / numPartitionsGraph * 10  // make sample size 20% larger than size of the partition
+    val sample_filter_val = 1.0 / numPartitionsGraph * 100  // make sample size 20% larger than size of the partition
     // take 100% of ones and 25% of zeros
     val fractions: Map[AnyVal, Double] = Map(0 -> 0.25, 1.0 -> 1)
 
@@ -518,7 +518,7 @@ object Baseline_full_v1 {
     val testData = {
       prepareData(testCommonFriendsCounts, positives, friend_masks, projected_bin_mask, common_bin_mask_counts, ageSexBC,cityRegBC,friendscountBC)
         .map(t => t._1 -> LabeledPoint(t._2._2.getOrElse(0.0), t._2._1))
-        .filter(t => t._2.label == 0.0)
+        .filter(t => t._2.label == 0.0 )
         .map(t => t._1 -> LabeledPoint(t._2.label, scaler1.transform(t._2.features)))
     }
 
@@ -530,11 +530,12 @@ object Baseline_full_v1 {
           Seq(id._1 -> (id._2, prediction), id._2 -> (id._1, prediction))
         }
         .filter(t => t._1 % 11 == 7 && t._2._2 >= threshold)
+        //.filter(t => t._2._2 >= threshold)
         .groupByKey(numPartitions)
         .map(t => {
           val user = t._1
-          val firendsWithRatings = t._2
-          val topBestFriends = firendsWithRatings.toList.sortBy(-_._2).take(100).map(x => x._1)
+          val friendsWithRatings = t._2
+          val topBestFriends = friendsWithRatings.toList.sortBy(-_._2).take(100).map(x => x._1)
           (user, topBestFriends)
         })
         .sortByKey(true, 1)

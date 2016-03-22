@@ -53,6 +53,7 @@ object Baseline_full_v1_testing_iter {
     val demographyPath = dataDir + "demography"
     val predictionPath = dataDir + "prediction"
     val modelPath = dataDir + "LogisticRegressionModel"
+    val validationPredictionPath = dataDir + "validPrediction"
     val numPartitions = 200
     val numPartitionsGraph = 107
 
@@ -446,7 +447,7 @@ object Baseline_full_v1_testing_iter {
     //
     val data = {
       prepareData(commonFriendsCounts, positives, friend_masks, projected_bin_mask, common_bin_mask_counts, ageSexBC, cityRegBC, friendscountBC)
-        .map(t => LabeledPoint(t._2._2.getOrElse(0.0), t._2._1))
+        .map(t => t._1 -> LabeledPoint(t._2._2.getOrElse(0.0), t._2._1))
     }
 
 
@@ -460,9 +461,9 @@ object Baseline_full_v1_testing_iter {
     val validation_ns = splits(1)
 
     // Scalling data
-    val scaler1 = new StandardScaler().fit(training_ns.map(x => x.features))
-    val training = training_ns.map(x => LabeledPoint(x.label, scaler1.transform(x.features))).cache()
-    val validation = validation_ns.map(x => LabeledPoint(x.label, scaler1.transform(x.features)))
+    val scaler1 = new StandardScaler().fit(training_ns.map(x => x._2.features))
+    val training = training_ns.map(x => x._2).map(x => LabeledPoint(x.label, scaler1.transform(x.features))).cache()
+    val validation = validation_ns.map(x => x._2).map(x => LabeledPoint(x.label, scaler1.transform(x.features)))
 
 
     val y_positive = training.filter(x => x.label==1).count()
@@ -498,12 +499,6 @@ object Baseline_full_v1_testing_iter {
 
 
 
-    println("model ROC = " + rocLogReg.toString)
-    println ("positives" + y_positive.toString)
-    println ("negatives" + y_negative.toString)
-    println ("positives" + (y_positive*1.0/(y_positive+y_negative)).toString)
-    println ("negatives" + (y_negative*1.0/(y_positive+y_negative)).toString)
-
 
   def printToFile(f: java.io.File)(op: java.io.PrintWriter => Unit) {
     val p = new java.io.PrintWriter(f)
@@ -513,22 +508,102 @@ object Baseline_full_v1_testing_iter {
   val today = Calendar.getInstance.getTime
 
 
-  import java.io._
-  val datastr = Array("PCA size: " + PCAsize.toString,
-                   "Sample filter: " + sample_filter_val.toString,
-                   "Model step: " + step_iter.toString,
-                   "",
-                   "model ROC = " + rocLogReg.toString,
-                   "positives" + y_positive.toString,
-                   "negatives" + y_negative.toString,
-                   "positives" + (y_positive*1.0/(y_positive+y_negative)).toString,
-                   "negatives" + (y_negative*1.0/(y_positive+y_negative)).toString)
+
+    val test_NDCG_CommonFriendsCounts = {
+      sqlc
+        .read.parquet(commonFriendsPath + "/part_*/")
+        .map(t => PairWithCommonFriends(t.getAs[Int](0), t.getAs[Int](1), t.getAs[Int](2)))
+        //.filter(pair => pair.person1 % 11 == 7 || pair.person2 % 11 == 7)
+        .filter(pair => pair.person1 % 11 != 7 || pair.person2 % 11 != 7)
+        .map(pair => (pair.person1, pair.person2) -> pair)
+        .subtractByKey(training_ns)
+        .map (t => t._2) // mapping back to PairWithCommonFriends
+    }
+
+    // val count1 = testNDCGCommonFriendsCounts.count()
+    // val count2 = testNDCGCommonFriendsCounts.subtractByKey(training_ns).count()
+    // val count3 = testNDCGCommonFriendsCounts.subtractByKey(training_ns.map(t => (t._1._2,t._1._1) -> t._2)).count()
+    // val count4 = testNDCGCommonFriendsCounts.subtractByKey(training_ns).subtractByKey(training_ns.map(t => (t._1._2,t._1._1) -> 1)).count()
+
+ 
+    val test_NDCG_Data = {
+      prepareData(test_NDCG_CommonFriendsCounts, positives, friend_masks, projected_bin_mask, common_bin_mask_counts, ageSexBC,cityRegBC,friendscountBC)
+        .map(t => t._1 -> LabeledPoint(t._2._2.getOrElse(0.0), t._2._1))
+        .filter(t => (t._2.label == 0.0) || math.random<0.1)
+        .map(t => t._1 -> LabeledPoint(t._2.label, scaler1.transform(t._2.features)))
+    }
+
+    // saving real data
+    test_NDCG_Data.filter(t => t._2.label ==1).map(t => t._1).saveAsTextFile(validationPredictionPath + "_real",  classOf[GzipCodec])
 
 
-  printToFile(new File(dataDir + "example_"+today.toString+".txt")) { p =>
-          datastr.foreach(p.println)
+
+
+    val count1 = test_NDCG_Data.count
+    val count2 = test_NDCG_Data.filter(t => t._2.label ==1 ).count
+
+
+    // step 8
+    val test_NDCG_Prediction = {
+      validation_ns
+        .flatMap { case (id, LabeledPoint(label, features)) =>
+          val prediction = model.predict(features)
+          Seq(id._1 -> (id._2, prediction), id._2 -> (id._1, prediction))
         }
-        
-  
+        //.filter(t => t._1 % 11 == 7 && t._2._2 >= threshold)
+        .filter(t => t._2._2 >= threshold)
+        .groupByKey(numPartitions)
+        .map(t => {
+          val user = t._1
+          val firendsWithRatings = t._2
+          val topBestFriends = firendsWithRatings.toList.sortBy(-_._2).take(100).map(x => x._1)
+          (user, topBestFriends)
+        })
+        .sortByKey(true, 1)
+        .map(t => t._1 + "\t" + t._2.mkString("\t"))
+    }
+
+    
+
+    test_NDCG_Prediction.saveAsTextFile(validationPredictionPath,  classOf[GzipCodec])
+
+
+
+
+  // import java.io._
+  // val datastr = Array("PCA size: " + PCAsize.toString,
+  //                  "Sample filter: " + sample_filter_val.toString,
+  //                  "Model step: " + step_iter.toString,
+  //                  "",
+  //                  "model ROC = " + rocLogReg.toString,
+  //                  "positives" + y_positive.toString,
+  //                  "negatives" + y_negative.toString,
+  //                  "positives" + (y_positive*1.0/(y_positive+y_negative)).toString,
+  //                  "negatives" + (y_negative*1.0/(y_positive+y_negative)).toString)
+
+
+  // printToFile(new File(dataDir + "example_"+today.toString+".txt")) { p =>
+  //         datastr.foreach(p.println)
+  //       }
+   
+
+    val valid_count = validation_ns.count()
+    val train_count = training_ns.count()
+
+    println("model ROC = " + rocLogReg.toString)
+    println ("positives " + y_positive.toString)
+    println ("negatives " + y_negative.toString)
+    println ("positives " + (y_positive*1.0/(y_positive+y_negative)).toString)
+    println ("negatives " + (y_negative*1.0/(y_positive+y_negative)).toString)     
+    println ("validation_size: " + valid_count)
+    println ("training_size: " + train_count)
+
+    println ("test_NDCG_size: " + count1)
+    println ("test_NDCG_ones_size: " + count2)
+    //println ("test2: " + count2)
+    //println ("test3: " + count3)
+    //println ("test4: " + count4)
+
+
   }
 }
