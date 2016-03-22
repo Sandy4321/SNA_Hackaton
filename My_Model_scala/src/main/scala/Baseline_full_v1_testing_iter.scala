@@ -287,7 +287,7 @@ object Baseline_full_v1_testing_iter {
 
     val sample_filter_val = 1.0 / numPartitionsGraph * 10  // make sample size 20% larger than size of the partition
     // take 100% of ones and 25% of zeros
-    val fractions: Map[AnyVal, Double] = Map(0 -> 0.25, 1.0 -> 1)
+    val fractions: Map[AnyVal, Double] = Map(0 -> 0.20, 1.0 -> 1)
 
     val commonFriendsCounts = {
       sqlc
@@ -416,7 +416,7 @@ object Baseline_full_v1_testing_iter {
         .map(x => x._1 -> (x._2._1.toArray.deep.union(
                             x._2._2.getOrElse(zero_masks_common_bin_mask) )))  // join with friend_masks
 
-        //                  x._2._2.getOrElse(zero_masks_pca).map (l => l.toString().toDouble / x._2._1(0) ))))  // join with friend_masks
+        //                  x._2._2.getOrElse(zero_masks_common_bin_mask).map (l => l.toString().toDouble / math.max(1,x._2._1(0)) ))))  // join with friend_masks
         .map(x => x._1 -> (Vectors.dense(x._2.toArray.map({l => l.toString().toDouble}))))  // convert back to vector_dense
 
         .leftOuterJoin(positives)

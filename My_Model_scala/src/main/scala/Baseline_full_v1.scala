@@ -38,6 +38,9 @@ object Baseline_full_v1 {
 
     val sparkConf = new SparkConf()
       .setAppName("Baseline")
+      .set("spark.local.dir","/mnt/dev1/spark-temp")
+
+
     val sc = new SparkContext(sparkConf)
     val sqlc = new SQLContext(sc)
 
@@ -52,11 +55,11 @@ object Baseline_full_v1 {
     val predictionPath = dataDir + "prediction"
     val modelPath = dataDir + "LogisticRegressionModel"
     val numPartitions = 200
-    //val numPartitionsGraph = 107
+    val numPartitionsGraph = 107
 
-    val numPartitionsGraph = 10
+    //val numPartitionsGraph = 10
     val PCAsize = 47      //  best size is 51
-    val create_counters = true
+    val create_counters = false
 
 
     //
@@ -250,9 +253,6 @@ object Baseline_full_v1 {
                     Vectors.dense(row.getAs[Seq[Short]](2).toArray.map(_.toDouble)))
             }
 
-    val pca = new PCA(PCAsize).fit(commonFriendsCounts_bin_mask.map(t => t._2))
-
-    val projected_bin_mask = commonFriendsCounts_bin_mask.map(p => p._1 -> pca.transform(p._2).toArray)
 
 
 
@@ -361,12 +361,15 @@ object Baseline_full_v1 {
                      positives: RDD[((Int, Int), Double)],
                      friend_masks: RDD[((Int, Int), Seq[Int])],
                      projected_bin_mask: RDD[((Int, Int), Array[Double])],
+                     common_bin_mask_counts: RDD[((Int, Int), Array[Double])],
                      ageSexBC:  Broadcast[scala.collection.Map[Int, AgeSex ]],
                      cityRegBC: Broadcast[scala.collection.Map[Int, UserCity]],
                      friendscountBC: Broadcast[scala.collection.Map[Int, Int]]) = {
 
       val zero_fr_masks_lst = "%021d".format(0).takeRight(21).map(_.toString().toInt)
       val zero_masks_pca = "%0250d".format(0).takeRight(PCAsize).map(_.toString().toInt).toArray
+      val zero_masks_common_bin_mask = "%025d".format(0).takeRight(22).map(_.toString().toInt).toArray
+
 
 
       commonFriendsCounts
@@ -405,19 +408,47 @@ object Baseline_full_v1 {
         // .map(x => x._1 -> (Vectors.dense(x._2.toArray.map({l => l.toString().toDouble}))))  // convert back to vector_dense
   
         .leftOuterJoin(projected_bin_mask)
-        .map(x => x._1 -> (x._2._1.toArray.deep.union(x._2._2.getOrElse(zero_masks_pca))))  // join with friend_masks
+        .map(x => x._1 -> (x._2._1.toArray.deep.union(
+                            x._2._2.getOrElse(zero_masks_pca))))  // join with friend_masks
         .map(x => x._1 -> (Vectors.dense(x._2.toArray.map({l => l.toString().toDouble}))))  // convert back to vector_dense
+
+
+        .leftOuterJoin(common_bin_mask_counts)
+        .map(x => x._1 -> (x._2._1.toArray.deep.union(
+        //                    x._2._2.getOrElse(zero_masks_common_bin_mask) )))  // join with friend_masks
+                           x._2._2.getOrElse(zero_masks_common_bin_mask).map (l => l.toString().toDouble / math.max(1,x._2._1(0)) ))))  // join with friend_masks
+        .map(x => x._1 -> (Vectors.dense(x._2.toArray.map({l => l.toString().toDouble}))))  // convert back to vector_dense
+
 
         .leftOuterJoin(positives)
         
     }
 
 
+
+  def get_common_counts (all_common_frieds: Array[Short]) = {
+
+        var sum_bins =  Array.fill[Double](22)(0)
+        for (i <- 0 until 21)
+            sum_bins(i) = all_common_frieds(i + 22 * i - (i * (i+1))/2)
+        sum_bins
+    } 
+
+
+    // Count common friends by their mask
+    val common_bin_mask_counts = commonFriendsCounts_bin_mask.map(t => t._1 -> get_common_counts(t._2.toArray.map(l => l.toShort)))
+
+
+
+    val pca = new PCA(PCAsize).fit(commonFriendsCounts_bin_mask.map(t => t._2))
+    val projected_bin_mask = commonFriendsCounts_bin_mask.map(p => p._1 -> pca.transform(p._2).toArray)
+
+
     //
     // if point class is not positive than we make it zero
     //
     val data = {
-      prepareData(commonFriendsCounts, positives, friend_masks, projected_bin_mask, ageSexBC, cityRegBC, friendscountBC)
+      prepareData(commonFriendsCounts, positives, friend_masks, projected_bin_mask, common_bin_mask_counts, ageSexBC, cityRegBC, friendscountBC)
         .map(t => LabeledPoint(t._2._2.getOrElse(0.0), t._2._1))
     }
 
@@ -449,9 +480,12 @@ object Baseline_full_v1 {
 
     // run training algorithm to build the model
 
+
+
+    val step_iter = 6000
     // https://www.kaggle.com/rootua/avito-context-ad-clicks/apache-spark-scala-logistic-regression/run/27034
     val model_not_trained =  new LogisticRegressionWithLBFGS().setNumClasses(2).setIntercept(true)
-    model_not_trained.optimizer.setNumIterations(3000)
+    model_not_trained.optimizer.setNumIterations(step_iter)
     val model = model_not_trained.run(training)
 
 
@@ -482,7 +516,7 @@ object Baseline_full_v1 {
     }
 
     val testData = {
-      prepareData(testCommonFriendsCounts, positives, friend_masks, projected_bin_mask, ageSexBC,cityRegBC,friendscountBC)
+      prepareData(testCommonFriendsCounts, positives, friend_masks, projected_bin_mask, common_bin_mask_counts, ageSexBC,cityRegBC,friendscountBC)
         .map(t => t._1 -> LabeledPoint(t._2._2.getOrElse(0.0), t._2._1))
         .filter(t => t._2.label == 0.0)
         .map(t => t._1 -> LabeledPoint(t._2.label, scaler1.transform(t._2.features)))
@@ -507,7 +541,9 @@ object Baseline_full_v1 {
         .map(t => t._1 + "\t" + t._2.mkString("\t"))
     }
 
-    // testPrediction.saveAsTextFile(predictionPath,  classOf[GzipCodec])
+    
+
+    testPrediction.saveAsTextFile(predictionPath,  classOf[GzipCodec])
 
     println("model ROC = " + rocLogReg.toString)
     println ("positives" + y_positive.toString)
