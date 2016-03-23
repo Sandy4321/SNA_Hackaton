@@ -509,6 +509,12 @@ object Baseline_full_v1_testing_iter {
 
 
 
+  //
+  // We want to take all elements for which we don't have predictions
+  // - Elements not included in (11 mod 7) list 
+  // - Elements not in training set
+  //
+
     val test_NDCG_CommonFriendsCounts = {
       sqlc
         .read.parquet(commonFriendsPath + "/part_*/")
@@ -545,7 +551,7 @@ object Baseline_full_v1_testing_iter {
 
     // step 8
     val test_NDCG_Prediction = {
-      validation_ns
+      test_NDCG_Data
         .flatMap { case (id, LabeledPoint(label, features)) =>
           val prediction = model.predict(features)
           Seq(id._1 -> (id._2, prediction), id._2 -> (id._1, prediction))
@@ -600,6 +606,7 @@ object Baseline_full_v1_testing_iter {
 
     println ("test_NDCG_size: " + count1)
     println ("test_NDCG_ones_size: " + count2)
+    println ("threshold: " + threshold.toString)
     //println ("test2: " + count2)
     //println ("test3: " + count3)
     //println ("test4: " + count4)

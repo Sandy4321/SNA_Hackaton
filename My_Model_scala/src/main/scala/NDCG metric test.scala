@@ -15,6 +15,7 @@ import scala.collection.mutable.ArrayBuffer
 
 
 
+case class UserPredictions(userId: Int, predicted: Array[Int])
 
 
 object NDCG_test {
@@ -71,34 +72,57 @@ object NDCG_test {
                         predicted = ids.drop(1).map({l => l.toInt})    
                         }
                     
-                    (userId, predicted)
+                    UserPredictions(userId, predicted)
                     }
 
-                ).filter(t => t._1!=0)
+                ).filter(t => t.userId!=0)
                }
     
+    graph.take(50).map(t => println(t.userId + " " + t.predicted.toVector))
 
-    //graph.take(50).map(t => println (t))
+    // // Collecting real connections for graph
+    // val graph_real_par1 = {sc.textFile(validationPredictionPath+"_real")
+    //                 .map(line => {
+    //                     val lineSplit = line.replace("(", "").replace(")", "").split(",")
+    //                     (lineSplit(0).toInt,lineSplit(1).toInt)
 
-    val graph_real_par1 = {sc.textFile(validationPredictionPath+"_real")
-                    .map(line => {
-                        val lineSplit = line.replace("(", "").replace(")", "").split(",")
-                        (lineSplit(0).toInt,lineSplit(1).toInt)
+    //                     })}
 
-                        })}
-    val graph_real = graph_real_par1.map(t => t._1 -> t._2).union(graph_real_par1.map(t => t._2 -> t._1)).groupByKey()
+    // val graph_real = {graph_real_par1.map(t => t._1 -> t._2)
+    //                     .union(graph_real_par1
+    //                     .map(t => t._2 -> t._1))
+    //                     .groupByKey()
+    //                     .collectAsMap()}
 
-    graph_real.take(20).map(println)
+    // graph_real_par1.take(20).map(println)
 
-    println(graph.count)
-    println(graph_real.count)
-    println (Iterator(1,0,1,1).map(t => t==1).map(if (_) 1d else 0d).toArray.toVector.map(_.toString))
-
-
-    val evaluate_score: Double = {graph
+    // println(graph.count)
+    // //println(graph_real.count)
+    // println (Iterator(1,0,1,1).map(t => t==1).map(if (_) 1d else 0d).toArray.toVector.map(_.toString))
 
 
-        
+    // //val evaluate_score: Double = {
+    // val evaluate_score = {
+    //     graph.map (t => {
+    //                 //val eval_set = graph_real.get(t.userId)
+    //                 val eval_set = graph_real.get(t.userId).toArray
+
+    //                 val real = t.predicted.map(eval_set.contains).map(if (_) 1d else 0d)
+    //                 val rdcg = dcg(real.iterator)
+    //                 val ideal = (0 until eval_set.size).iterator.map(_ => 1d) // Ideal output contains all hidden links of this user
+    //                 val idcg = dcg(ideal)
+    //                 val accum = rdcg / idcg
+
+    //                 t.userId -> accum
+    //                 } )
+    //          .filter(t => !t._2.isNaN)
+    // }
+
+    // evaluate_score.take(50).map(println)
+    // graph_real_par1.filter(t => t._1 == 6928).take(50).map(println)
+
+    // println ("Evaluation score: ", evaluate_score.map(t => t._2).reduce((a, b) => a + b))
+
     //
 
     // def evaluate(file: File): Double = {
