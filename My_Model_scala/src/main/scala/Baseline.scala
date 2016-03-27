@@ -32,6 +32,11 @@ import scala.collection.mutable.ArrayBuffer
 import org.apache.spark.mllib.feature.PCA
 
 
+case class UserFriendsReversed (friends: Array[Int], user: Int)
+case class DFuserlinkproba (person1: Int, person2: Int, proba: Double)
+case class CoomonFriendswithFriendsStats (person1: Int, person2: Int, maxcommfriends: Int, maxlinks: Int, stat1: Double, stat2: Double)
+
+
 case class SimplePair(person1: Int, person2: Int)
 case class PairWithCommonFriendsAndFriendMask(person1: Int, person2: Int, commonFriendsCount: Array[Short])
 case class PairWithCommonFriends(person1: Int, person2: Int, commonFriendsCount: Int)
@@ -41,6 +46,9 @@ case class UserCity(city: Int, city_active: Int)
 case class RocVals(reg_par: Double, roc_val: Double)
 case class Friend(user: Int, mask_bit: Int)
 case class UserFriends2(user: Int, friends: Array[Friend])
+
+
+
 
 object Baseline {
 

@@ -9,6 +9,7 @@ cd ..
 ## rm -rf Data_short/trainSubReversedGraph/
 rm -rf Data_short/LogisticRegressionModel/
 rm -rf Data_short/prediction/
+## rm -rf Data_short/commonFriendsCountsPartitioned_with_ids/
 ## rm -rf Data_short/commonFriendsCountsPartitioned/
 ## rm -rf Data_short/trainSubReversedGraph_bin_map/
 ## rm -rf Data_short/commonFriendsCountsPartitioned_bin_map

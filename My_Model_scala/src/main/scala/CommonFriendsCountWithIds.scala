@@ -15,7 +15,8 @@ import scala.collection.mutable.ArrayBuffer
 
 
 
-object Data_test {
+
+object CommonFriendsCountWithIds {
 
   def main(args: Array[String]) {
 
@@ -64,32 +65,19 @@ object Data_test {
     // // Inverting and saving friends graph in specific way: friends -> common_friend_ID
     // //
 
-    // graph
-    //       .filter(userFriends => userFriends.friends.length >= 8 && userFriends.friends.length <= 1000)
-    //        // making change from "user -> friend" to "friend -> user"
-    //       .flatMap(userFriends => userFriends.friends.map(x => (x.user, userFriends.user))) 
+    graph
+          .filter(userFriends => userFriends.friends.length >= 8 && userFriends.friends.length <= 1000)
+           // making change from "user -> friend" to "friend -> user"
+          .flatMap(userFriends => userFriends.friends.map(x => (x.user, userFriends.user))) 
           
-    //       .groupByKey(numPartitions)          // number of groups that will be created after partitioning
-    //       .map(t => UserFriends(t._1, t._2.toArray))
-    //       .map(userFriends => (userFriends.friends.sorted, userFriends.user))
-    //       .filter(friends => friends._1.length >= 2 && friends._1.length <= 2000)
-    //       .map(t => UserFriendsReversed (t._1,t._2))
-    //       .toDF
-    //       .write.parquet(reversedGraphPath + "_userID")
+          .groupByKey(numPartitions)          // number of groups that will be created after partitioning
+          .map(t => UserFriends(t._1, t._2.toArray))
+          .map(userFriends => (userFriends.friends.sorted, userFriends.user))
+          .filter(friends => friends._1.length >= 2 && friends._1.length <= 2000)
+          .map(t => UserFriendsReversed (t._1,t._2))
+          .toDF
+          .write.parquet(reversedGraphPath + "_userID")
 
-
-    sc.textFile(commonFriendsPath + "_with_ids" + "/part_*")
-    .map(line => {
-                val lineSplit = line.replace("(", "").replace(")", "").split(",")
-                val pers1 = lineSplit(0).toInt
-                val pers2 = lineSplit(1).toInt
-                val friends_stats = lineSplit.drop(0).drop(0).toVector
-                (pers1,pers2) -> friends_stats
-            })
-    .take(50)
-    .map(println)
-
-    System.exit(1)
 
 
 
@@ -176,21 +164,20 @@ object Data_test {
                          .filter (t => t._2._2 != None)
                          .map (t => t._2._1 -> t._2._2.toVector(0))
                          .reduceByKey((a,b) => (
-                                                // List(a._1) :: List(b._1) :: Nil,
-                                                //List(Nil).extend(a._1),
-                                                // List(a._1) ++ List(b._1),
+                                                // Append constructions of lists and quantiles
                                                 math.max(a._1,b._1),
                                                 a._2 + b._2,
                                                 math.max(a._3,b._3),
                                                 math.max(a._4,b._4)
                                                 ))
-                         
+                         // probably bettter to save in parquet?
+                         //.map (t => CoomonFriendswithFriendsStats(t._1._1,t._1._2,t._2._1,t._2._2,t._2._3,t._2._4))
                          //.take(50)
                          //.map(println)
             }
 
 
-    commonFriendsCounts_with_ids.toDF.repartition(4).write.parquet(commonFriendsPath + "_with_ids" + "/part_" + k)
+    commonFriendsCounts_with_ids.repartition(4).saveAsTextFile(commonFriendsPath + "_with_ids" + "/part_" + k,  classOf[GzipCodec])
             
     }
 

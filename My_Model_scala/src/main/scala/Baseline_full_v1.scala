@@ -57,10 +57,9 @@ object Baseline_full_v1 {
     val numPartitions = 200
     val numPartitionsGraph = 107
 
-    //val numPartitionsGraph = 10
-    val PCAsize = 47      //  best size is 51
+    val PCAsize = 47      //  best size is 47
     val create_counters = false
-
+    val create_commonFriendsStat = false
 
     //
     // https://habrahabr.ru/company/odnoklassniki/blog/277527/
@@ -153,6 +152,20 @@ object Baseline_full_v1 {
                     commonFriendsCounts.toDF.repartition(4).write.parquet(commonFriendsPath + "/part_" + k)
                   }
 
+
+
+              graph
+                      .filter(userFriends => userFriends.friends.length >= 8 && userFriends.friends.length <= 1000)
+                       // making change from "user -> friend" to "friend -> user"
+                      .flatMap(userFriends => userFriends.friends.map(x => (x.user, userFriends.user))) 
+                      
+                      .groupByKey(numPartitions)          // number of groups that will be created after partitioning
+                      .map(t => UserFriends(t._1, t._2.toArray))
+                      .map(userFriends => (userFriends.friends.sorted, userFriends.user))
+                      .filter(friends => friends._1.length >= 2 && friends._1.length <= 2000)
+                      .map(t => UserFriendsReversed (t._1,t._2))
+                      .toDF
+                      .write.parquet(reversedGraphPath + "_userID")
 
 
 
@@ -287,7 +300,7 @@ object Baseline_full_v1 {
 
     val sample_filter_val = 1.0 / numPartitionsGraph * 100  // make sample size 20% larger than size of the partition
     // take 100% of ones and 25% of zeros
-    val fractions: Map[AnyVal, Double] = Map(0 -> 0.25, 1.0 -> 1)
+    val fractions: Map[AnyVal, Double] = Map(0 -> 0.15, 1.0 -> 1)
 
     val commonFriendsCounts = {
       sqlc
@@ -355,6 +368,72 @@ object Baseline_full_v1 {
 
 
 
+    //
+    // Generate map with information about commonFriendsStat
+    //
+    if (create_commonFriendsStat){
+
+            val commonFriendsCounts_addit = {
+              sqlc
+                .read.parquet(commonFriendsPath + "/part_*")
+                .map(t => (t.getAs[Int](0), t.getAs[Int](1)) -> t.getAs[Int](2))
+                .leftOuterJoin(positives)
+                .map (t => t._1 -> (t._2._1, t._2._2.getOrElse(0.0) ))
+                .map (t => t._1 -> (t._2._1,t._2._2, 
+                                        friendscountBC.value.getOrElse(t._1._1,0),
+                                        friendscountBC.value.getOrElse(t._1._2,0)  ))
+
+                .map (t => t._1 -> (t._2._1, t._2._2, t._2._1.toDouble/math.max(t._2._3,t._2._4),
+                                                      t._2._1.toDouble/math.min(t._2._3,t._2._4)))
+            }
+
+
+
+            //
+            //  Generating pairs of common friends for future analysis
+            //
+
+            for (k <- 0 until numPartitionsGraph) {
+              val commonFriendsCounts_with_ids = {
+                          sqlc.read.parquet(reversedGraphPath + "_userID")
+                                   .map(t =>  generatePairs(t.getAs[Seq[Int]](0), numPartitionsGraph, k) -> t.getAs[Int](1))
+                                   //.map(t =>  generatePairs(t.getAs[Seq[Int]](0),1,0) -> t.getAs[Int](1))
+
+                                  // making pairs: ((person1_id, person2_id), common_friend_id)
+                                   .flatMap(pair => pair._1.map(x => x -> pair._2))
+                                   .groupByKey()
+                                   .map (t => t._1 -> t._2.toSeq.sorted)
+                                   .map (t => t._1 -> generatePairs(t._2.toSeq,1,0))
+                                   .filter (t => t._2.length>0)
+                                   .flatMap (pairs => pairs._2.map(x => x -> pairs._1))
+                                   .leftOuterJoin(commonFriendsCounts_addit)
+                                   .filter (t => t._2._2 != None)
+                                   .map (t => t._2._1 -> t._2._2.toVector(0))
+                                   .reduceByKey((a,b) => (
+                                                          math.max(a._1,b._1),
+                                                          a._2 + b._2,
+                                                          math.max(a._3,b._3),
+                                                          math.max(a._4,b._4)
+                                                          ))
+                      }
+
+              commonFriendsCounts_with_ids.repartition(4).saveAsTextFile(commonFriendsPath + "_with_ids" + "/part_" + k,  classOf[GzipCodec])
+            }
+        }
+
+
+  val commonFriendsStat = {
+          sc.textFile(commonFriendsPath + "_with_ids" + "/part_*/")
+          .map(line => {
+                      val lineSplit = line.replace("(", "").replace(")", "").split(",")
+                      val pers1 = lineSplit(0).toInt
+                      val pers2 = lineSplit(1).toInt
+                      val friends_stats = lineSplit.drop(0).drop(0).map(l => l.toDouble) //.toVector
+                      (pers1,pers2) -> friends_stats
+                  })
+          }
+
+
     // step 5
     def prepareData(
                      commonFriendsCounts: RDD[PairWithCommonFriends],
@@ -364,11 +443,13 @@ object Baseline_full_v1 {
                      common_bin_mask_counts: RDD[((Int, Int), Array[Double])],
                      ageSexBC:  Broadcast[scala.collection.Map[Int, AgeSex ]],
                      cityRegBC: Broadcast[scala.collection.Map[Int, UserCity]],
-                     friendscountBC: Broadcast[scala.collection.Map[Int, Int]]) = {
+                     friendscountBC: Broadcast[scala.collection.Map[Int, Int]],
+                     commonFriendsStat: RDD[((Int, Int), Array[Double])]) = {
 
       val zero_fr_masks_lst = "%021d".format(0).takeRight(21).map(_.toString().toInt)
       val zero_masks_pca = "%0250d".format(0).takeRight(PCAsize).map(_.toString().toInt).toArray
       val zero_masks_common_bin_mask = "%025d".format(0).takeRight(22).map(_.toString().toInt).toArray
+      val zero_masks_commonfiendsstat = "%06d".format(0).takeRight(6).map(_.toString().toInt).toArray
 
 
 
@@ -377,16 +458,20 @@ object Baseline_full_v1 {
           pair.commonFriendsCount.toDouble,
 
 
-          if (friendscountBC.value.getOrElse(pair.person1,0) != 0)
-                         pair.commonFriendsCount.toDouble/friendscountBC.value.getOrElse(pair.person1,0) else 0,
+          // if (friendscountBC.value.getOrElse(pair.person1,0) != 0)
+          //                pair.commonFriendsCount.toDouble/friendscountBC.value.getOrElse(pair.person1,0) else 0,
 
 
-          if (friendscountBC.value.getOrElse(pair.person2,0) != 0)
-                         pair.commonFriendsCount.toDouble/friendscountBC.value.getOrElse(pair.person2,0) else 0,
+          // if (friendscountBC.value.getOrElse(pair.person2,0) != 0)
+          //                pair.commonFriendsCount.toDouble/friendscountBC.value.getOrElse(pair.person2,0) else 0,
 
 
           if (friendscountBC.value.getOrElse(pair.person1,0) != 0 && friendscountBC.value.getOrElse(pair.person2,0) != 0)
                          pair.commonFriendsCount.toDouble/math.max(friendscountBC.value.getOrElse(pair.person1,0),friendscountBC.value.getOrElse(pair.person1,0)) else 0,
+
+
+          if (friendscountBC.value.getOrElse(pair.person1,0) != 0 && friendscountBC.value.getOrElse(pair.person2,0) != 0)
+                         pair.commonFriendsCount.toDouble/math.min(friendscountBC.value.getOrElse(pair.person1,0),friendscountBC.value.getOrElse(pair.person1,0)) else 0,
 
 
           pair.commonFriendsCount.toDouble/friendscountBC.value.getOrElse(pair.person2,999999),
@@ -420,6 +505,13 @@ object Baseline_full_v1 {
         .map(x => x._1 -> (Vectors.dense(x._2.toArray.map({l => l.toString().toDouble}))))  // convert back to vector_dense
 
 
+        .leftOuterJoin(commonFriendsStat)
+        .map(x => x._1 -> (x._2._1.toArray.deep.union(
+        //                    x._2._2.getOrElse(zero_masks_common_bin_mask) )))  // join with friend_masks
+                           x._2._2.getOrElse(zero_masks_commonfiendsstat) )))  // join with friend_masks
+        .map(x => x._1 -> (Vectors.dense(x._2.toArray.map({l => l.toString().toDouble}))))  // convert back to vector_dense
+
+
         .leftOuterJoin(positives)
         
     }
@@ -448,7 +540,7 @@ object Baseline_full_v1 {
     // if point class is not positive than we make it zero
     //
     val data = {
-      prepareData(commonFriendsCounts, positives, friend_masks, projected_bin_mask, common_bin_mask_counts, ageSexBC, cityRegBC, friendscountBC)
+      prepareData(commonFriendsCounts, positives, friend_masks, projected_bin_mask, common_bin_mask_counts, ageSexBC, cityRegBC, friendscountBC,commonFriendsStat)
         .map(t => LabeledPoint(t._2._2.getOrElse(0.0), t._2._1))
     }
 
@@ -516,7 +608,7 @@ object Baseline_full_v1 {
     }
 
     val testData = {
-      prepareData(testCommonFriendsCounts, positives, friend_masks, projected_bin_mask, common_bin_mask_counts, ageSexBC,cityRegBC,friendscountBC)
+      prepareData(testCommonFriendsCounts, positives, friend_masks, projected_bin_mask, common_bin_mask_counts, ageSexBC,cityRegBC,friendscountBC,commonFriendsStat)
         .map(t => t._1 -> LabeledPoint(t._2._2.getOrElse(0.0), t._2._1))
         .filter(t => t._2.label == 0.0 )
         .map(t => t._1 -> LabeledPoint(t._2.label, scaler1.transform(t._2.features)))

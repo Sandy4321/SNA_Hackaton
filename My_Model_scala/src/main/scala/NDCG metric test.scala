@@ -14,7 +14,7 @@ import scala.collection.mutable.ArrayBuffer
 
 
 
-
+case class UserPredictionsProba(userId: Int, probability: Double)
 case class UserPredictions(userId: Int, predicted: Array[Int])
 
 
@@ -39,9 +39,8 @@ object NDCG_test {
     val modelDataPath = dataDir + "Data_Model"
     val modelPath = dataDir + "LogisticRegressionModel"
     val validationPredictionPath = dataDir + "validPrediction"
+    val NDCGPredictionPath = dataDir + "NDCGPrediction"
     val numPartitions = 200
-    //val numPartitionsGraph = 107
-    //val numPartitionsGraph = 20
 
 
   import java.io._
@@ -57,12 +56,72 @@ object NDCG_test {
               res
         }
 
-
-    //val graph = {
     
+    // Reading probabilities of having particular edge
+    //
+
+
+   val graph_proba = {sqlc.read.parquet(validationPredictionPath +"_proba")
+                            .map(t => t.getAs[Int](0) -> (t.getAs[Int](1), t.getAs[Double](2)))
+                       }
+
+
+
+   val graph11_proba = {sqlc.read.parquet(predictionPath +"_proba")
+                            .map(t => t.getAs[Int](0) -> (t.getAs[Int](1), t.getAs[Double](2)))
+                       }
+
+
+
+
+    // Reading resulting predictions
+    //
+    val threshold = 0.0
+    val total_count = 100
+
+    val graph_predictions = {       
+            graph_proba
+            .filter(t => t._2._2 >= threshold) 
+            .groupByKey(numPartitions)
+            .map(t => {
+              val user = t._1
+              val friendsWithRatings = t._2
+              val topBestFriends = friendsWithRatings.toList.sortBy(-_._2).take(total_count).map(x => x._1)
+              (user, topBestFriends.toArray)
+            })
+            .sortByKey(true, 1)
+            //.map(t => t._1 -> t._2.toVector) 
+            .map(t => UserPredictions(t._1, t._2))
+            
+            }
+
+
+
+
+    val graph11_predictions = {       
+            graph11_proba
+            .filter(t =>  t._1 % 11 == 7 && t._2._2 >= threshold) 
+            .groupByKey(numPartitions)
+            .map(t => {
+              val user = t._1
+              val friendsWithRatings = t._2
+              val topBestFriends = friendsWithRatings.toList.sortBy(-_._2).take(total_count).map(x => x._1)
+              (user, topBestFriends.toArray)
+            })
+            .sortByKey(true, 1)
+            //.map(t => t._1 -> t._2.toVector) 
+            .map(t => UserPredictions(t._1, t._2))
+            
+            }
+
+
+    graph11_predictions.map(t => t.userId.toString + "\t" + t.predicted.mkString("\t")).saveAsTextFile(NDCGPredictionPath,  classOf[GzipCodec])
+
+
+
+
     val graph = {sc.textFile(validationPredictionPath)
                    .map(line => {
-                    // val userId = line.nonEmpty
                     var userId: Int =  0
                     var predicted: Array[Int] = Array(0,0,0)
 
@@ -76,77 +135,63 @@ object NDCG_test {
                     }
 
                 ).filter(t => t.userId!=0)
+                   //.map (t => t.userId -> t.predicted.toVector)
+                   //.sortByKey()
+                   //.map (t => t._2)
                }
     
-    graph.take(50).map(t => println(t.userId + " " + t.predicted.toVector))
-
-    // // Collecting real connections for graph
-    // val graph_real_par1 = {sc.textFile(validationPredictionPath+"_real")
-    //                 .map(line => {
-    //                     val lineSplit = line.replace("(", "").replace(")", "").split(",")
-    //                     (lineSplit(0).toInt,lineSplit(1).toInt)
-
-    //                     })}
-
-    // val graph_real = {graph_real_par1.map(t => t._1 -> t._2)
-    //                     .union(graph_real_par1
-    //                     .map(t => t._2 -> t._1))
-    //                     .groupByKey()
-    //                     .collectAsMap()}
-
-    // graph_real_par1.take(20).map(println)
-
-    // println(graph.count)
-    // //println(graph_real.count)
-    // println (Iterator(1,0,1,1).map(t => t==1).map(if (_) 1d else 0d).toArray.toVector.map(_.toString))
 
 
-    // //val evaluate_score: Double = {
-    // val evaluate_score = {
-    //     graph.map (t => {
-    //                 //val eval_set = graph_real.get(t.userId)
-    //                 val eval_set = graph_real.get(t.userId).toArray
 
-    //                 val real = t.predicted.map(eval_set.contains).map(if (_) 1d else 0d)
-    //                 val rdcg = dcg(real.iterator)
-    //                 val ideal = (0 until eval_set.size).iterator.map(_ => 1d) // Ideal output contains all hidden links of this user
-    //                 val idcg = dcg(ideal)
-    //                 val accum = rdcg / idcg
 
-    //                 t.userId -> accum
-    //                 } )
-    //          .filter(t => !t._2.isNaN)
-    // }
+    // Collecting real connections for graph
+    val graph_real_par1 = {sc.textFile(validationPredictionPath+"_real")
+                    .map(line => {
+                        val lineSplit = line.replace("(", "").replace(")", "").split(",")
+                        (lineSplit(0).toInt,lineSplit(1).toInt)
+                        
+                        })}
 
-    // evaluate_score.take(50).map(println)
-    // graph_real_par1.filter(t => t._1 == 6928).take(50).map(println)
 
-    // println ("Evaluation score: ", evaluate_score.map(t => t._2).reduce((a, b) => a + b))
 
-    //
+    // Graph_real structure:
+    // --- (12672400,Vector(50849344, 47234864, 36199872))
+    // 
+    val graph_real = {graph_real_par1.map(t => t._1 -> t._2)
+                        .union(graph_real_par1
+                                              .map(t => t._2 -> t._1))
+                        .groupByKey()
+                        .map(t => t._1.toInt -> t._2.toVector)
+                        .sortByKey()
+                        .collectAsMap()
+                        }
 
-    // def evaluate(file: File): Double = {
-    //   val inputStream = new FileInputStream(file)
-    //   try {
-    //     val src = Source.fromInputStream(new GZIPInputStream(inputStream)).getLines()
-    //     var accum: Double = 0d
-    //     for (line <- src.map(_.trim) if line.nonEmpty) {
-    //       val ids = line.split("""\s+""")
-    //       val userId: Int = ids.head.toInt
-    //       val predicted: Iterator[Int] = ids.iterator.drop(1).map(_.toInt)
-    //       for (actual <- evaluationSet.get(userId)) {     // Ignore users having no hidden links
-    //         val real = predicted.map(actual.contains).map(if (_) 1d else 0d)
-    //         val rdcg = dcg(real)
-    //         val ideal = (0 until actual.size).iterator.map(_ => 1d) // Ideal output contains all hidden links of this user
-    //         val idcg = dcg(ideal)
-    //         accum += rdcg / idcg
-    //       }
-    //     }
-    //     accum / evaluationSet.size * 1000       // Divide by # of users having hidden links
-    //   } finally {
-    //     inputStream.close()
-    //   }
-    // }
+
+
+    // ---
+    // --- Evaluating score using NDCG metric
+    // ---
+
+    val evaluate_score = {
+          graph_predictions
+        //ignore users having no hidden links
+          .filter (t => graph_real.getOrElse(t.userId, Vector(0)) !=0)
+          .map (t => {
+                    val eval_set: Vector[Int] = graph_real.getOrElse(t.userId, Vector(0))
+                    val real = t.predicted.map(eval_set.contains).map(if (_) 1d else 0d)
+                    val rdcg = dcg(real.iterator)
+                    val ideal = (0 until eval_set.size).iterator.map(_ => 1d) // Ideal output contains all hidden links of this user
+                    val idcg = dcg(ideal)
+                    val accum = rdcg / idcg
+
+                    t.userId -> accum
+                    } )
+             .filter(t => !t._2.isNaN)
+    }
+
+
+    val count_greal = graph_real.size
+    println ("Evaluation score: ", evaluate_score.map(t => t._2).reduce((a, b) => a + b)/count_greal *1000)
 
 
 

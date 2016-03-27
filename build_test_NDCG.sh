@@ -12,6 +12,9 @@ cd ..
 ## rm -rf Data_short/commonFriendsCountsPartitioned/
 ## rm -rf Data_short/trainSubReversedGraph_bin_map/
 ## rm -rf Data_short/commonFriendsCountsPartitioned_bin_map
+rm -rf Data_short/NDCGPrediction
+
+rm -rf Data/NDCGPrediction
 
 
 spark-1.6.0/bin/spark-submit --class "NDCG_test" --master local[*] --driver-memory 24G My_Model_scala/target/scala-2.10/baseline_2.10-1.0.jar Data_short/
