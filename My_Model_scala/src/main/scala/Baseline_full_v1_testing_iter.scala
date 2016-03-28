@@ -62,6 +62,12 @@ object Baseline_full_v1_testing_iter {
     val create_counters = false
     val create_commonFriendsStat = false
 
+
+    val sample_filter_val = 1.0 / numPartitionsGraph * 100  // make sample size 20% larger than size of the partition
+    // take 100% of ones and 25% of zeros
+    val fractions: Map[AnyVal, Double] = Map(0 -> 0.15, 1.0 -> 1)
+
+
     //
     // https://habrahabr.ru/company/odnoklassniki/blog/277527/
     //
@@ -286,9 +292,7 @@ object Baseline_full_v1_testing_iter {
     //  **** Random Sampling ****
     //
 
-    val sample_filter_val = 1.0 / numPartitionsGraph * 100  // make sample size 20% larger than size of the partition
-    // take 100% of ones and 25% of zeros
-    val fractions: Map[AnyVal, Double] = Map(0 -> 0.15, 1.0 -> 1)
+
 
     val commonFriendsCounts = {
       sqlc
@@ -375,7 +379,7 @@ object Baseline_full_v1_testing_iter {
                   .toDF
                   .write.parquet(reversedGraphPath + "_userID")
 
-          
+
             val commonFriendsCounts_addit = {
               sqlc
                 .read.parquet(commonFriendsPath + "/part_*")
@@ -462,9 +466,14 @@ object Baseline_full_v1_testing_iter {
 
 
       commonFriendsCounts
-        .map(pair => (pair.person1, pair.person2) -> (Vectors.dense(
+        .map(pair => (pair.person1.toInt, pair.person2.toInt) -> (Vectors.dense(
           pair.commonFriendsCount.toDouble,
 
+          if (friendscountBC.value.getOrElse(pair.person1,0) != 0 && friendscountBC.value.getOrElse(pair.person2,0) != 0)
+                     math.max(friendscountBC.value.getOrElse(pair.person1,0),friendscountBC.value.getOrElse(pair.person1,0)) else 0,
+
+          if (friendscountBC.value.getOrElse(pair.person1,0) != 0 && friendscountBC.value.getOrElse(pair.person2,0) != 0)
+                     math.min(friendscountBC.value.getOrElse(pair.person1,0),friendscountBC.value.getOrElse(pair.person1,0)) else 0,
 
           // if (friendscountBC.value.getOrElse(pair.person1,0) != 0)
           //                pair.commonFriendsCount.toDouble/friendscountBC.value.getOrElse(pair.person1,0) else 0,
@@ -594,7 +603,7 @@ object Baseline_full_v1_testing_iter {
     }
 
     // estimate model quality
-    @transient val metricsLogReg = new BinaryClassificationMetrics(predictionAndLabels, 100)
+    @transient val metricsLogReg = new BinaryClassificationMetrics(predictionAndLabels, 100)  // 100 - num bins
     val threshold = metricsLogReg.fMeasureByThreshold(2.0).sortBy(-_._2).take(1)(0)._1
 
     val rocLogReg = metricsLogReg.areaUnderROC()
